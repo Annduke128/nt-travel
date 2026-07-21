@@ -1,0 +1,16 @@
+node_modules/
+dist/
+server-dist/
+.env
+.env.*
+!.env.example
+*.log
+*.core
+core
+
+# Local tooling and source artifacts that may contain upstream sample metadata.
+.hallmark/
+.opencode/
+.planning/
+CiHMS Booking Engine.postman_collection.json
+CiHMS Booking Engine.postman_collection.json:Zone.Identifier
