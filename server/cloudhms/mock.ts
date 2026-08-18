@@ -12,6 +12,7 @@ function nights(search: SearchRequest) {
 }
 
 export class MockBedbankService implements BedbankService {
+  async health() {}
   async properties(query: string) {
     const normalized = query.trim().toLocaleLowerCase("vi");
     return properties.filter((property) => !normalized || `${property.name} ${property.city}`.toLocaleLowerCase("vi").includes(normalized));
@@ -24,7 +25,9 @@ export class MockBedbankService implements BedbankService {
     const count = nights(search);
     return [
       { propertyId: search.propertyId, roomTypeId: "deluxe-ocean", roomTypeName: "Deluxe Ocean", ratePlanId: "breakfast-flex", ratePlanName: "Linh hoạt · Bao gồm bữa sáng", quantity: 4, total: 2_450_000 * count, average: 2_450_000, tax: 245_000 * count, currency: "VND", maxOccupancy: 3 },
-      { propertyId: search.propertyId, roomTypeId: "deluxe-ocean", roomTypeName: "Deluxe Ocean", ratePlanId: "room-only", ratePlanName: "Không hoàn hủy · Chỉ phòng", quantity: 2, total: 2_150_000 * count, average: 2_150_000, tax: 215_000 * count, currency: "VND", maxOccupancy: 3 },
+      // Rate plan này cố tình không có thuế: CloudHMS thật không trả thuế ở mọi endpoint,
+      // giữ trạng thái đó trong mock để lỗi hiển thị lộ ra ngay khi phát triển.
+      { propertyId: search.propertyId, roomTypeId: "deluxe-ocean", roomTypeName: "Deluxe Ocean", ratePlanId: "room-only", ratePlanName: "Không hoàn hủy · Chỉ phòng", quantity: 2, total: 2_150_000 * count, average: 2_150_000, currency: "VND", maxOccupancy: 3 },
     ];
   }
   async detail(search: SearchRequest & { propertyId: string; roomTypeId: string; ratePlanId: string }) {
@@ -32,7 +35,7 @@ export class MockBedbankService implements BedbankService {
     if (!room) throw new AppError(404, "NO_AVAILABILITY", "Hạng phòng này không còn khả dụng");
     const dailyRates = Array.from({ length: nights(search) }, (_, index) => {
       const date = new Date(`${search.arrivalDate}T00:00:00Z`); date.setUTCDate(date.getUTCDate() + index);
-      return { date: date.toISOString().slice(0, 10), amount: room.average, tax: room.tax / nights(search) };
+      return { date: date.toISOString().slice(0, 10), amount: room.average, ...(room.tax === undefined ? {} : { tax: room.tax / nights(search) }) };
     });
     return { ...room, dailyRates, policies: [
       { type: "Hủy phòng", description: search.ratePlanId === "room-only" ? "Không hoàn hủy." : "Miễn phí hủy trước 3 ngày nhận phòng." },

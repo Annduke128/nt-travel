@@ -4,6 +4,7 @@ export type { Profile, Role, UserStatus } from "../shared/contracts.js";
 export type Session = { profile: Profile; accessToken: string; refreshToken: string; expiresIn: number };
 
 export interface AuthService {
+  health(): Promise<void>;
   login(email: string, password: string): Promise<Session>;
   authenticate(accessToken: string): Promise<Profile>;
   refresh(refreshToken: string): Promise<Session>;
@@ -16,6 +17,7 @@ export interface AuthService {
 }
 
 export interface BedbankService {
+  health(): Promise<void>;
   properties(query: string): Promise<PropertyDto[]>;
   hotels(search: SearchRequest): Promise<HotelAvailabilityDto[]>;
   rooms(search: SearchRequest & { propertyId: string }): Promise<RoomAvailabilityDto[]>;

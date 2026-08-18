@@ -41,6 +41,32 @@ describe("CloudHMS HTTP client", () => {
     );
   });
 
+  test("token request carries the organization identifier", async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(response(200, { access_token: "token-1", expires_in: 3600 }))
+      .mockImplementation(async () => response(200, { data: [] }));
+    const client = new CloudHmsClient(config, fetcher);
+
+    await client.request("/hotels/info", { method: "GET" });
+
+    const [url, init] = fetcher.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://identity.example/connect/token");
+    expect(String(init.body)).toContain("organization_id=org-id");
+  });
+
+  test("api requests only send documented headers", async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(response(200, { access_token: "token-1", expires_in: 3600 }))
+      .mockImplementation(async () => response(200, { data: [] }));
+    const client = new CloudHmsClient(config, fetcher);
+
+    await client.request("/hotels/info", { method: "GET" });
+
+    const [, init] = fetcher.mock.calls[1] as [string, RequestInit];
+    expect(Object.keys(init.headers as Record<string, string>).sort())
+      .toEqual(["accept", "authorization", "content-type", "x-correlation-id"]);
+  });
+
   test("refreshes the token and retries exactly once after 401", async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(response(200, { access_token: "expired", expires_in: 3600 }))

@@ -20,6 +20,7 @@ export class CloudHmsClient {
         grant_type: "client_credentials",
         client_id: this.config.clientId,
         client_secret: this.config.clientSecret,
+        organization_id: this.config.organizationId,
       });
       let response: Response;
       try {
@@ -55,14 +56,13 @@ export class CloudHmsClient {
       try {
         response = await this.fetcher(`${this.config.apiUrl}${path}`, {
           method: options.method ?? "POST",
+          // Chỉ gửi header có trong collection CloudHMS đã duyệt, cộng x-correlation-id
+          // dùng cho log tương quan của chính BFF.
           headers: {
+            accept: "application/json",
             authorization: `Bearer ${token.value}`,
             "content-type": "application/json",
             "x-correlation-id": correlationId,
-            "x-organization-id": this.config.organizationId,
-            "x-organization-code": this.config.organizationCode,
-            "x-distribution-channel-id": this.config.distributionChannelId,
-            "x-requestor-id": this.config.requestorId,
           },
           ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
           signal: AbortSignal.timeout(this.config.timeoutMs),

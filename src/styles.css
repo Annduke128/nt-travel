@@ -252,6 +252,7 @@ kbd { border: var(--rule-thin) solid var(--color-rule); border-radius: var(--rad
 .hotel-rate { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-md); padding-block-start: var(--space-md); border-block-start: var(--rule-thin) solid var(--color-rule-2); }
 .hotel-rate span { color: var(--color-muted); font-size: var(--text-sm); }
 .hotel-rate strong { font-family: var(--font-display); font-size: var(--text-lg); }
+.inline-empty { margin: 0; padding: var(--space-sm); border: var(--rule-thin) dashed var(--color-rule); border-radius: var(--radius-sm); color: var(--color-muted); font-size: var(--text-sm); }
 .room-options { display: grid; gap: var(--space-sm); }
 .room-option { display: grid; gap: var(--space-md); padding: var(--space-md); border: var(--rule-thin) solid var(--color-rule-2); border-radius: var(--radius-sm); background: var(--color-paper); }
 .room-option h4 { margin: 0; font-family: var(--font-display); font-size: var(--text-md); }

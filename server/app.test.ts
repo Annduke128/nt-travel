@@ -1,7 +1,11 @@
 // @vitest-environment node
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import request from "supertest";
 import { describe, expect, test, vi } from "vitest";
 import { createApp } from "./app.js";
+import { AppError } from "./errors.js";
 import type { AuthService, BedbankService } from "./services.js";
 import { MockBedbankService } from "./cloudhms/mock.js";
 
@@ -16,6 +20,7 @@ const staff = {
 
 function services() {
   const auth: AuthService = {
+    health: vi.fn(async () => undefined),
     login: vi.fn(async () => ({ profile: staff, accessToken: "access", refreshToken: "refresh", expiresIn: 3600 })),
     authenticate: vi.fn(async () => staff),
     refresh: vi.fn(),
@@ -27,6 +32,7 @@ function services() {
     resetPassword: vi.fn(),
   };
   const bedbank: BedbankService = {
+    health: vi.fn(async () => undefined),
     properties: vi.fn(async () => [{ id: "p1", name: "Vinpearl Beachfront Nha Trang", city: "Nha Trang" }]),
     hotels: vi.fn(async () => []),
     rooms: vi.fn(async () => []),
@@ -36,6 +42,103 @@ function services() {
 }
 
 describe("BFF", () => {
+  test("liveness is public and independent from dependency readiness", async () => {
+    const readiness = vi.fn(async () => { throw new Error("upstream unavailable"); });
+    const app = createApp({ ...services(), readiness });
+
+    const response = await request(app).get("/health/live");
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ status: "ok" });
+    expect(readiness).not.toHaveBeenCalled();
+  });
+
+  test("readiness caches a successful dependency probe briefly", async () => {
+    const readiness = vi.fn(async () => undefined);
+    const app = createApp({ ...services(), readiness, readinessCacheMs: 10_000 });
+
+    const first = await request(app).get("/health/ready");
+    const second = await request(app).get("/health/ready");
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(first.body).toEqual({ status: "ready" });
+    expect(readiness).toHaveBeenCalledTimes(1);
+  });
+
+  test("readiness hides dependency error details", async () => {
+    const readiness = vi.fn(async () => { throw new Error("secret upstream hostname"); });
+    const app = createApp({ ...services(), readiness, readinessCacheMs: 0 });
+
+    const response = await request(app).get("/health/ready");
+
+    expect(response.status).toBe(503);
+    expect(response.body).toEqual({ status: "not_ready" });
+    expect(JSON.stringify(response.body)).not.toContain("secret upstream hostname");
+  });
+
+  test("authenticated API responses are non-cacheable and carry hardened headers", async () => {
+    const app = createApp(services());
+
+    const response = await request(app).get("/api/me").set("Cookie", "nt_access=access");
+
+    expect(response.status).toBe(200);
+    expect(response.headers["cache-control"]).toBe("private, no-store");
+    expect(response.headers["content-security-policy"]).toContain("default-src 'self'");
+    expect(response.headers["x-frame-options"]).toBe("DENY");
+  });
+
+  test("production cookies and transport headers require HTTPS", async () => {
+    const app = createApp({ ...services(), production: true });
+
+    const response = await request(app).post("/api/auth/login").send({ email: "staff@nttravel.vn", password: "temporary-password" });
+
+    expect(String(response.headers["set-cookie"])).toContain("Secure");
+    expect(response.headers["strict-transport-security"]).toContain("max-age=");
+  });
+
+  test("serves revalidated HTML and immutable fingerprinted assets", async () => {
+    const publicDir = await mkdtemp(path.join(os.tmpdir(), "nt-travel-static-"));
+    await mkdir(path.join(publicDir, "assets"));
+    await writeFile(path.join(publicDir, "index.html"), "<!doctype html><title>NT Travel</title>");
+    await writeFile(path.join(publicDir, "assets", "app-abc123.js"), "console.log('ok')");
+    try {
+      const app = createApp({ ...services(), publicDir });
+
+      const html = await request(app).get("/");
+      const asset = await request(app).get("/assets/app-abc123.js");
+
+      expect(html.headers["cache-control"]).toBe("no-cache");
+      expect(asset.headers["cache-control"]).toBe("public, max-age=31536000, immutable");
+    } finally {
+      await rm(publicDir, { recursive: true, force: true });
+    }
+  });
+
+  test("login limiter uses the configured proxy hop and isolates client IPs", async () => {
+    const deps = services();
+    vi.mocked(deps.auth.login).mockRejectedValue(new AppError(401, "AUTH_REQUIRED", "Email hoặc mật khẩu không đúng"));
+    const app = createApp({ ...deps, trustProxyHops: 1 });
+    const attempt = (ip: string) => request(app).post("/api/auth/login").set("X-Forwarded-For", ip).send({ email: "staff@nttravel.vn", password: "wrong-password" });
+
+    for (let count = 0; count < 8; count += 1) expect((await attempt("198.51.100.10")).status).toBe(401);
+    expect((await attempt("198.51.100.10")).status).toBe(429);
+    expect((await attempt("203.0.113.20")).status).toBe(401);
+  });
+
+  test("login limiter bounds tracked client keys by evicting the oldest", async () => {
+    const deps = services();
+    vi.mocked(deps.auth.login).mockRejectedValue(new AppError(401, "AUTH_REQUIRED", "Email hoặc mật khẩu không đúng"));
+    const app = createApp({ ...deps, trustProxyHops: 1, rateLimitMaxKeys: 2 });
+    const attempt = (ip: string) => request(app).post("/api/auth/login").set("X-Forwarded-For", ip).send({ email: "staff@nttravel.vn", password: "wrong-password" });
+
+    expect((await attempt("198.51.100.1")).status).toBe(401);
+    expect((await attempt("198.51.100.2")).status).toBe(401);
+    expect((await attempt("198.51.100.3")).status).toBe(401);
+    for (let count = 0; count < 8; count += 1) expect((await attempt("198.51.100.1")).status).toBe(401);
+    expect((await attempt("198.51.100.1")).status).toBe(429);
+  });
+
   test("login returns a safe profile and writes httpOnly cookies", async () => {
     const app = createApp(services());
     const response = await request(app).post("/api/auth/login").send({ email: "staff@nttravel.vn", password: "temporary-password" });
@@ -44,6 +147,17 @@ describe("BFF", () => {
     expect(response.body).toEqual({ data: { profile: staff } });
     expect(String(response.headers["set-cookie"])).toContain("HttpOnly");
     expect(JSON.stringify(response.body)).not.toContain("access");
+  });
+
+  test("a malformed request body is a client error and stays traceable", async () => {
+    const app = createApp(services());
+
+    const response = await request(app).post("/api/availability/hotels")
+      .set("Cookie", "nt_access=access").set("content-type", "application/json").send("{");
+
+    expect(response.status).toBe(400);
+    expect(response.body.error.code).toBe("VALIDATION_ERROR");
+    expect(response.body.error.requestId).toBe(response.headers["x-request-id"]);
   });
 
   test("staff cannot call admin APIs", async () => {

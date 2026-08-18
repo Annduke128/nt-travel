@@ -4,7 +4,7 @@
 
 ## Chạy local
 
-1. Sao chép `.env.example` thành `.env` và điền cấu hình Supabase. Giữ `CLOUDHMS_MODE=mock` khi chưa có API credentials.
+1. Dùng Node theo `.nvmrc`, chạy `npm ci`, sau đó sao chép `.env.example` thành `.env` và điền cấu hình Supabase. Giữ `CLOUDHMS_MODE=mock` khi chưa có API credentials. Server tự nạp `.env` khi `NODE_ENV` khác `production`; production nhận biến từ secret store và không đóng gói `.env`.
 2. Chạy migration bằng `supabase db reset`.
 3. Tạo Admin đầu tiên (lệnh có thể chạy lại):
 
@@ -15,7 +15,8 @@
    Mật khẩu được nhập ẩn qua stdin, không truyền trên command line.
 4. Mở hai terminal: `npm run dev:server` và `npm run dev`.
 
-Vite proxy `/api` sang BFF tại `127.0.0.1:3001`. Production chạy `npm run build`, `npm run build:server`, rồi `npm start`; Node phục vụ cả API và frontend build cùng domain.
+Vite proxy `/api` sang BFF tại `127.0.0.1:3001`. Production dùng image từ `Dockerfile`; Node phục vụ cả API và frontend build cùng domain. Xem [runbook production](docs/operations-runbook.md) và [checklist UAT](docs/customer-uat.md).
+Kết quả production-readiness local gần nhất nằm tại [validation report](docs/validation-report-2026-07-25.md).
 
 ## Bật CloudHMS live
 
@@ -36,8 +37,20 @@ Log CloudHMS chỉ gồm endpoint, latency, status và correlation ID; không lo
 ## Kiểm tra
 
 ```bash
+npm run lint
 npm run typecheck
 npm test
 npm run build
 npm run build:server
 ```
+
+Hoặc chạy toàn bộ release gate:
+
+```bash
+npm run check
+```
+
+Health endpoints:
+
+- `/health/live`: tiến trình đang sống.
+- `/health/ready`: Supabase và CloudHMS sẵn sàng phục vụ.

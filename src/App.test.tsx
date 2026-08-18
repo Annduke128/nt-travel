@@ -62,6 +62,56 @@ describe("NT Travel bedbank v1", () => {
     expect(screen.queryByText(/tiếp tục đặt phòng/i)).not.toBeInTheDocument();
   });
 
+  test("a rate plan without upstream tax shows a dash, never zero", async () => {
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/me") return json({ data: { profile: admin } });
+      if (url === "/api/availability/hotels") return json({ data: [{ id: "p1", name: "Vinpearl Beachfront Nha Trang", city: "Nha Trang", quantity: 4, fromPrice: 2450000, currency: "VND" }] });
+      if (url === "/api/availability/rooms") return json({ data: [{ propertyId: "p1", roomTypeId: "r1", roomTypeName: "Deluxe Ocean", ratePlanId: "rate1", ratePlanName: "Chỉ phòng", quantity: 4, total: 4900000, average: 2450000, currency: "VND" }] });
+      if (url === "/api/availability/detail") return json({ data: { propertyId: "p1", roomTypeId: "r1", roomTypeName: "Deluxe Ocean", ratePlanId: "rate1", ratePlanName: "Chỉ phòng", quantity: 0, total: 4900000, average: 2450000, currency: "VND", dailyRates: [{ date: "2026-07-23", amount: 2450000 }], policies: [] } });
+      return json({ data: [] });
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole("heading", { name: "Tìm kỳ nghỉ xứng tầm." });
+    await user.type(screen.getByLabelText("Điểm đến hoặc khách sạn"), "Nha Trang");
+    await user.click(screen.getByRole("button", { name: "Tìm khách sạn" }));
+    await user.click(await screen.findByRole("button", { name: /xem phòng tại vinpearl beachfront/i }));
+
+    expect(await screen.findByText("Thuế: chưa có dữ liệu")).toBeVisible();
+
+    await user.click(await screen.findByRole("button", { name: /xem giá chi tiết deluxe ocean/i }));
+
+    expect(await screen.findByText("CloudHMS không trả dữ liệu thuế cho hạng phòng này.")).toBeVisible();
+    expect(screen.queryByText("0 ₫")).not.toBeInTheDocument();
+  });
+
+  test("a hotel without room rates explains why nothing appeared", async () => {
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/me") return json({ data: { profile: admin } });
+      if (url === "/api/availability/hotels") return json({ data: [{ id: "p1", name: "Vinpearl Beachfront Nha Trang", city: "Nha Trang", quantity: 4, fromPrice: 2450000, currency: "VND" }] });
+      if (url === "/api/availability/rooms") return json({ data: [] });
+      return json({ data: [] });
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole("heading", { name: "Tìm kỳ nghỉ xứng tầm." });
+    await user.type(screen.getByLabelText("Điểm đến hoặc khách sạn"), "Nha Trang");
+    await user.click(screen.getByRole("button", { name: "Tìm khách sạn" }));
+    await user.click(await screen.findByRole("button", { name: /xem phòng tại vinpearl beachfront/i }));
+
+    expect(await screen.findByText(/chưa có hạng phòng khả dụng/i)).toBeVisible();
+  });
+
+  test("a failing session check is reported instead of looking like a logout", async () => {
+    vi.mocked(fetch).mockImplementationOnce(() => json({ error: { code: "UPSTREAM_UNAVAILABLE", message: "Dịch vụ tạm thời không khả dụng" } }, 503));
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Đăng nhập Bedbank" })).toBeVisible();
+    expect(screen.getByRole("alert")).toHaveTextContent("Dịch vụ tạm thời không khả dụng");
+  });
+
   test("admin can open staff management", async () => {
     const user = userEvent.setup();
     render(<App />);

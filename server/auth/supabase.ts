@@ -17,6 +17,11 @@ export class SupabaseAuthService implements AuthService {
     this.publicClient = createClient(url, anonKey, { auth: { persistSession: false, autoRefreshToken: false } });
   }
 
+  async health() {
+    const { error } = await this.admin.from("profiles").select("user_id", { count: "exact", head: true }).limit(1);
+    if (error) throw new AppError(503, "UPSTREAM_UNAVAILABLE", "Supabase chưa sẵn sàng");
+  }
+
   private async profile(userId: string, email = ""): Promise<Profile> {
     const { data, error } = await this.admin.from("profiles").select("user_id,display_name,role,status,must_change_password").eq("user_id", userId).single();
     if (error || !data) throw new AppError(403, "FORBIDDEN", "Tài khoản chưa được cấp hồ sơ nhân viên");

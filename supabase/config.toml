@@ -2,13 +2,31 @@ project_id = "nt-travel-bedbank"
 
 [api]
 enabled = true
-port = 54321
+port = 56321
 schemas = ["public", "graphql_public"]
 
 [db]
-port = 54322
-shadow_port = 54320
+port = 56322
+shadow_port = 56320
 major_version = 17
+
+[db.pooler]
+enabled = false
+port = 56329
+
+[studio]
+enabled = true
+port = 56323
+
+[inbucket]
+enabled = true
+port = 56324
+smtp_port = 56325
+pop3_port = 56326
+
+[analytics]
+enabled = true
+port = 56327
 
 [auth]
 enabled = true

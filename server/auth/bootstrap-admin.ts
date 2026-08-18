@@ -1,3 +1,4 @@
+import "../env.js";
 import { stdin, stdout } from "node:process";
 import { createClient } from "@supabase/supabase-js";
 import { loadConfig } from "../config.js";

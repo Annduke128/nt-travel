@@ -1,0 +1,18 @@
+.git
+.github
+.hallmark
+.opencode
+.planning
+node_modules
+dist
+server-dist
+.env
+.env.*
+!.env.example
+*.log
+*.core
+core
+docs
+supabase
+CiHMS Booking Engine.postman_collection.json
+CiHMS Booking Engine.postman_collection.json:Zone.Identifier

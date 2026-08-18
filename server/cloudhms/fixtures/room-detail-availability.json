@@ -1,0 +1,92 @@
+{
+  "data": {
+    "arrivalDate": "2026-06-01T00:00:00.0000000",
+    "departureDate": "2026-06-03T00:00:00.0000000",
+    "roomAvailabilityRates": [
+      {
+        "ratePlan": {
+          "id": "00000000-0000-0000-0000-000000000000",
+          "ratePlanId": "1604924a-a9c1-4197-b013-2e61d6a193d0",
+          "rateCode": "PHMS-T18",
+          "cancelPolicy": {
+            "code": "DEFAULT_CANCEL_POLICY_ORG",
+            "description": "DEFAULT_CANCEL_POLICY_ORG",
+            "isRefundable": false,
+            "detail": [
+              {
+                "amount": 100,
+                "type": "Percent",
+                "daysBeforeArrival": 0,
+                "order": 0
+              }
+            ]
+          },
+          "guaranteePolicy": {
+            "code": "DEFAULT_GUARANTEE",
+            "description": "DEFAULT_GUARANTEE",
+            "detail": [
+              {
+                "type": "Deposit",
+                "depositType": "Flat",
+                "depositAmount": 0,
+                "order": 0
+              }
+            ]
+          }
+        },
+        "roomType": {
+          "roomTypeID": "5051e26c-e710-4028-90ae-ad929b0309e7",
+          "maxOccupancy": 0,
+          "maxAdult": 0,
+          "maxChild": 0,
+          "roomSize": 0,
+          "isVilla": false,
+          "numberOfBedRooms": 0
+        },
+        "ratePlanId": "1604924a-a9c1-4197-b013-2e61d6a193d0",
+        "roomTypeId": "5051e26c-e710-4028-90ae-ad929b0309e7",
+        "totalAmount": {
+          "amount": {
+            "amount": 1800000
+          }
+        },
+        "averageAmount": {
+          "amount": 1800000
+        },
+        "totalPoint": 0,
+        "averagePoint": 0,
+        "quantity": 0,
+        "rates": [
+          {
+            "stayDate": "2026-06-01T00:00:00.0000000",
+            "amount": {
+              "amount": {
+                "amount": 900000
+              }
+            },
+            "packageAmount": {
+              "amount": {
+                "amount": 400000
+              }
+            },
+            "quantity": 0
+          },
+          {
+            "stayDate": "2026-06-02T00:00:00.0000000",
+            "amount": {
+              "amount": {
+                "amount": 900000
+              }
+            },
+            "packageAmount": {
+              "amount": {
+                "amount": 400000
+              }
+            },
+            "quantity": 0
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -33,6 +33,16 @@ export const errorHandler: ErrorRequestHandler = (error, request, response, _nex
     });
     return;
   }
+  // express.json gắn `type` lên lỗi body; đây là lỗi phía client, không phải lỗi máy chủ.
+  const bodyError = error as { type?: string };
+  if (error instanceof SyntaxError && bodyError.type === "entity.parse.failed") {
+    response.status(400).json({ error: { code: "VALIDATION_ERROR", message: "Dữ liệu không hợp lệ", requestId } });
+    return;
+  }
+  if (bodyError.type === "entity.too.large") {
+    response.status(413).json({ error: { code: "VALIDATION_ERROR", message: "Dữ liệu gửi lên quá lớn", requestId } });
+    return;
+  }
   if (error instanceof AppError) {
     response.status(error.status).json({
       error: { code: error.code, message: error.message, ...(error.details ? { details: error.details } : {}), requestId },

@@ -1,0 +1,50 @@
+{
+  "data": {
+    "total": 50,
+    "limit": 30,
+    "page": 0,
+    "items": [
+      {
+        "id": "f4df4f88-74e6-07d0-6502-1fe968b656fc",
+        "name": "Vinpearl Luxury Landmark 81",
+        "city": "TP Hồ Chí Minh",
+        "code": "VPLHLM",
+        "currencySymbol": "VND",
+        "status": 1,
+        "thumbnails": [
+          {
+            "id": "56ddfead-478a-1194-4583-1ed4da5e46eb",
+            "url": "https://cdn1.ivivu.com/iVivu/2019/01/17/14/vinpearl-luxury-landmark-81-1-800x450.png",
+            "order": 0,
+            "type": "thumbnail"
+          }
+        ]
+      },
+      {
+        "id": "c67377fc-d81d-4208-add9-47e32b69f998",
+        "name": "VinOasis Phú Quốc",
+        "city": "Phú Quốc",
+        "code": "VOPQ",
+        "currencySymbol": "VND",
+        "status": true,
+        "thumbnails": []
+      },
+      {
+        "id": "be38edc6-4e44-9e62-838a-311e34298786",
+        "name": "Vinpearl Hotel Imperia Hai Phong",
+        "city": "Hải Phòng",
+        "code": "VPCHIPHP",
+        "currencySymbol": "VND",
+        "status": 1,
+        "thumbnails": [
+          {
+            "id": "11d22fd0-3643-379f-1a4c-1662a1350317",
+            "url": "https://d1nabgopwop1kh.cloudfront.net/hotel-asset/30000002100774871_wh_19",
+            "order": 0,
+            "type": "thumbnail"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -73,6 +73,15 @@ for select to authenticated using (public.is_active_admin());
 create policy "admins read audit events" on public.audit_events
 for select to authenticated using (public.is_active_admin());
 
--- There are deliberately no client mutation policies. The BFF uses service_role.
-revoke insert, update, delete on public.profiles from authenticated, anon;
-revoke insert, update, delete on public.audit_events from authenticated, anon;
+-- Start from no table/sequence privileges, then grant only the operations each
+-- role needs. RLS still filters every authenticated SELECT.
+revoke all on public.profiles, public.audit_events from anon, authenticated, service_role;
+revoke all on sequence public.audit_events_id_seq from anon, authenticated, service_role;
+
+grant select on public.profiles, public.audit_events to authenticated;
+
+-- Client roles cannot mutate staff data. The BFF owns profile writes and
+-- append-only audit events through service_role.
+grant select, insert, update on public.profiles to service_role;
+grant insert on public.audit_events to service_role;
+grant usage on sequence public.audit_events_id_seq to service_role;

@@ -1,0 +1,84 @@
+{
+  "data": {
+    "arrivalDate": "2026-04-22T00:00:00.0000000",
+    "departureDate": "2026-04-24T00:00:00.0000000",
+    "propertyInfo": {
+      "id": "2dc6dc10-6fe4-493b-9278-00e00520d7e2",
+      "name": "Palace Gate Hotel",
+      "city": "Vietnam A Vietnam A Vietnam A Vietnam A Vietnam A",
+      "code": "VPCHTN",
+      "currencySymbol": "VND",
+      "status": true
+    },
+    "roomAvailabilityRates": [
+      {
+        "roomTypeID": "4ae8d255-b0ef-4a6f-ac17-0f89391fada4",
+        "ratePlanID": "78ab854c-780b-4239-8389-5c4f09560768",
+        "totalAmount": {
+          "amount": {
+            "amount": 0,
+            "currencyCode": "VND"
+          }
+        },
+        "averageAmount": {
+          "amount": 0,
+          "currencyCode": "VND"
+        },
+        "totalTaxAmount": {
+          "amount": 0,
+          "currencyCode": "VND"
+        },
+        "quantity": 47,
+        "rateAvailablity": {
+          "propertyId": "c67377fc-d81d-4208-add9-47e32b69f998",
+          "roomTypeId": "4ae8d255-b0ef-4a6f-ac17-0f89391fada4",
+          "ratePlanId": "78ab854c-780b-4239-8389-5c4f09560768",
+          "roomTypeCode": "BKX0N",
+          "quantity": 47,
+          "taxAmount": 0,
+          "ratePlan": {
+            "id": "78ab854c-780b-4239-8389-5c4f09560768",
+            "ratePlanId": "78ab854c-780b-4239-8389-5c4f09560768",
+            "rateCode": "DNMP1",
+            "name": "DNMP1",
+            "currency": "VND"
+          }
+        }
+      },
+      {
+        "roomTypeID": "1634b9cc-19a0-47ca-9d93-0ff14270c0e3",
+        "ratePlanID": "1c6b89c1-a351-484c-8416-d36b1357f73d",
+        "totalAmount": {
+          "amount": {
+            "amount": 1000000,
+            "currencyCode": "VND"
+          }
+        },
+        "averageAmount": {
+          "amount": 500000,
+          "currencyCode": "VND"
+        },
+        "totalTaxAmount": {
+          "amount": 0,
+          "currencyCode": "VND"
+        },
+        "quantity": 146,
+        "rateAvailablity": {
+          "propertyId": "c67377fc-d81d-4208-add9-47e32b69f998",
+          "roomTypeId": "1634b9cc-19a0-47ca-9d93-0ff14270c0e3",
+          "ratePlanId": "1c6b89c1-a351-484c-8416-d36b1357f73d",
+          "roomTypeCode": "ATSDG",
+          "quantity": 146,
+          "taxAmount": 0,
+          "ratePlan": {
+            "id": "1c6b89c1-a351-484c-8416-d36b1357f73d",
+            "ratePlanId": "1c6b89c1-a351-484c-8416-d36b1357f73d",
+            "rateCode": "RATE15PC",
+            "name": "RATE15PC",
+            "currency": "VND"
+          }
+        }
+      }
+    ]
+  }
+}

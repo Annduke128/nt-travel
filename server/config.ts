@@ -16,7 +16,11 @@ export type CloudHmsConfig = {
 
 export type ServerConfig = {
   port: number;
+  host: string;
   nodeEnv: string;
+  trustProxyHops: number;
+  shutdownTimeoutMs: number;
+  readinessCacheMs: number;
   supabaseUrl: string;
   supabaseAnonKey: string;
   supabaseServiceRoleKey: string;
@@ -26,6 +30,10 @@ export type ServerConfig = {
 const environmentSchema = z.object({
   NODE_ENV: z.string().default("development"),
   PORT: z.coerce.number().int().positive().default(3001),
+  HOST: z.string().min(1).default("127.0.0.1"),
+  TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(5).default(0),
+  SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().min(1000).max(60_000).default(10_000),
+  READINESS_CACHE_MS: z.coerce.number().int().min(0).max(60_000).default(10_000),
   SUPABASE_URL: z.string().default(""),
   SUPABASE_ANON_KEY: z.string().default(""),
   SUPABASE_SERVICE_ROLE_KEY: z.string().default(""),
@@ -45,6 +53,8 @@ const environmentSchema = z.object({
 export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ServerConfig {
   const value = environmentSchema.parse(environment);
   if (value.CLOUDHMS_MODE === "live") {
+    // CLOUDHMS_REQUESTOR_ID chưa được luồng read-only V1 sử dụng; giữ bắt buộc theo runbook
+    // để dành cho luồng booking sau này và để phát hiện secret store thiếu cấu hình sớm.
     const required = [
       "CLOUDHMS_CLIENT_ID",
       "CLOUDHMS_CLIENT_SECRET",
@@ -61,7 +71,11 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Server
   }
   return {
     port: value.PORT,
+    host: value.HOST,
     nodeEnv: value.NODE_ENV,
+    trustProxyHops: value.TRUST_PROXY_HOPS,
+    shutdownTimeoutMs: value.SHUTDOWN_TIMEOUT_MS,
+    readinessCacheMs: value.READINESS_CACHE_MS,
     supabaseUrl: value.SUPABASE_URL,
     supabaseAnonKey: value.SUPABASE_ANON_KEY,
     supabaseServiceRoleKey: value.SUPABASE_SERVICE_ROLE_KEY,

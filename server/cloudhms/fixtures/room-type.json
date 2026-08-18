@@ -1,0 +1,36 @@
+{
+  "data": {
+    "total": 19,
+    "limit": 100,
+    "page": 0,
+    "items": [
+      {
+        "id": "2a85d959-796b-4646-b9e9-6f1729426e66",
+        "name": "GTH room type 2",
+        "code": "GTHRT2",
+        "maxOccupancy": 4,
+        "status": 1,
+        "isPseudo": 0,
+        "hotelId": "c67377fc-d81d-4208-add9-47e32b69f998",
+        "thumbnails": []
+      },
+      {
+        "id": "bb057fb3-b943-4203-9778-5f2f6ed01bd4",
+        "name": "Zip Standard Garden View_up",
+        "code": "AZSDG",
+        "maxOccupancy": 4,
+        "status": 1,
+        "isPseudo": 0,
+        "hotelId": "c67377fc-d81d-4208-add9-47e32b69f998",
+        "thumbnails": [
+          {
+            "id": "474adfdb-915d-4f3e-b979-5ff8ac9bd6ea",
+            "url": "https://assets.stg.cloudhms.io/private/153dfce5-0e9d-4395-b776-5abc4c6a9c2b/2021/10/18/093239-6f6f4969-aaea-40fb-bf1e-1ab952938638.jpg",
+            "order": 1,
+            "type": "thumbnail"
+          }
+        ]
+      }
+    ]
+  }
+}

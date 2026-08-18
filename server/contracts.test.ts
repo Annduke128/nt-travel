@@ -23,4 +23,20 @@ describe("search contract", () => {
     expect(() => parseSearchRequest({ ...validSearch, rooms: [{ adults: 0, children: 0, infants: 0 }] }))
       .toThrow("Mỗi phòng phải có ít nhất một người lớn");
   });
+
+  test("accepts several rooms that share the same occupancy", () => {
+    const rooms = [{ adults: 2, children: 1, infants: 0 }, { adults: 2, children: 1, infants: 0 }];
+
+    expect(parseSearchRequest({ ...validSearch, rooms }).rooms).toHaveLength(2);
+  });
+
+  test("rejects rooms with different occupancy because CloudHMS takes one per request", () => {
+    expect(() => parseSearchRequest({ ...validSearch, rooms: [{ adults: 2, children: 0, infants: 0 }, { adults: 1, children: 2, infants: 0 }] }))
+      .toThrow("V1 chỉ hỗ trợ các phòng có cùng số khách");
+  });
+
+  test("rejects impossible calendar dates", () => {
+    expect(() => parseSearchRequest({ ...validSearch, arrivalDate: "2026-02-30" }))
+      .toThrow("Ngày nhận phòng không hợp lệ");
+  });
 });
