@@ -9,6 +9,28 @@ const array = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
 const string = (value: unknown, fallback = ""): string => typeof value === "string" ? value : fallback;
 const number = (value: unknown, fallback = 0): number => typeof value === "number" && Number.isFinite(value) ? value : fallback;
 
+// CloudHMS trả GUID toàn số 0 ở cấp một của `get-room-availability`, còn ID dùng được nằm lồng
+// trong `roomType` / `ratePlan`. Gửi GUID số 0 sang `get-room-detail-availability` nhận về
+// HTTP 400 RATE_PLAN_NOT_FOUND, nên phải bỏ qua nó thay vì coi là một chuỗi hợp lệ.
+const ZERO_GUID = "00000000-0000-0000-0000-000000000000";
+function identifier(...candidates: unknown[]): string {
+  for (const candidate of candidates) {
+    const value = string(candidate);
+    if (value && value !== ZERO_GUID) return value;
+  }
+  return "";
+}
+
+// `/pms-property/room-type` đặt tên trường là `name` / `code`; rate lồng trong availability lại
+// dùng `roomTypeName` / `roomTypeCode`. Hai shape không thay thế được cho nhau.
+const roomTypeLabel = (roomType: RecordValue): string =>
+  string(roomType.name, string(roomType.roomTypeName, string(roomType.code, string(roomType.roomTypeCode, "Hạng phòng"))));
+
+// Nhân viên gõ "Tây Ninh" nhưng catalog lưu "Hotel Tay Ninh 11" (và ngược lại với "Phú Quốc"),
+// nên so khớp điểm đến phải bỏ dấu ở cả hai phía.
+const normalize = (value: string): string =>
+  value.toLocaleLowerCase("vi").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d");
+
 const CATALOG_PAGE_LIMIT = 200;
 const CATALOG_MAX_PAGES = 50;
 
@@ -141,14 +163,14 @@ export class CloudHmsBedbankService implements BedbankService {
 
   async properties(query: string): Promise<PropertyDto[]> {
     const properties = await this.activeProperties();
-    const normalized = query.trim().toLocaleLowerCase("vi");
+    const normalized = normalize(query.trim());
     if (!normalized) return properties.slice(0, 20);
-    return properties.filter((property) => `${property.name} ${property.city}`.toLocaleLowerCase("vi").includes(normalized)).slice(0, 20);
+    return properties.filter((property) => normalize(`${property.name} ${property.city}`).includes(normalized)).slice(0, 20);
   }
 
   async hotels(search: SearchRequest): Promise<HotelAvailabilityDto[]> {
-    const normalized = search.destination.trim().toLocaleLowerCase("vi");
-    const matches = (await this.activeProperties()).filter((property) => `${property.name} ${property.city}`.toLocaleLowerCase("vi").includes(normalized));
+    const normalized = normalize(search.destination.trim());
+    const matches = (await this.activeProperties()).filter((property) => normalize(`${property.name} ${property.city}`).includes(normalized));
     if (matches.length === 0) return [];
     const batches: PropertyDto[][] = [];
     for (let index = 0; index < matches.length; index += 25) batches.push(matches.slice(index, index + 25));
@@ -216,16 +238,17 @@ export class CloudHmsBedbankService implements BedbankService {
       const total = nestedAmount(rate.totalAmount);
       if (total <= 0) return [];
       const ratePlan = object(rate.ratePlan ?? object(rate.rateAvailablity).ratePlan);
-      const roomTypeId = string(rate.roomTypeId ?? rate.roomTypeID ?? object(rate.rateAvailablity).roomTypeId);
-      const roomType = metadata.get(roomTypeId) ?? object(rate.roomType);
-      const ratePlanId = string(rate.ratePlanId ?? rate.ratePlanID ?? ratePlan.id);
+      const upstreamRoomType = object(rate.roomType);
+      const roomTypeId = identifier(rate.roomTypeId, rate.roomTypeID, upstreamRoomType.roomTypeID, object(rate.rateAvailablity).roomTypeId);
+      const ratePlanId = identifier(rate.ratePlanId, rate.ratePlanID, ratePlan.ratePlanId, ratePlan.id);
       if (!roomTypeId || !ratePlanId) return [];
+      const roomType = metadata.get(roomTypeId) ?? upstreamRoomType;
       const imageUrl = string(object(array(roomType.thumbnails)[0]).url);
       const tax = optionalAmount(rate.totalTaxAmount);
       return [{
         propertyId: search.propertyId,
         roomTypeId,
-        roomTypeName: string(roomType.name, string(roomType.code, "Hạng phòng")),
+        roomTypeName: roomTypeLabel(roomType),
         ratePlanId,
         ratePlanName: string(ratePlan.name, string(ratePlan.rateCode, "Giá tiêu chuẩn")),
         quantity: number(rate.quantity), total,
@@ -254,9 +277,9 @@ export class CloudHmsBedbankService implements BedbankService {
     const data = object(object(payload).data);
     const entries = array(data.roomAvailabilityRates).map(object);
     const item = entries.find((entry) =>
-      string(entry.roomTypeId ?? entry.roomTypeID ?? object(entry.roomType).roomTypeID) === search.roomTypeId
-      && string(entry.ratePlanId ?? entry.ratePlanID ?? object(entry.ratePlan).ratePlanId) === search.ratePlanId,
-    ) ?? entries[0];
+      identifier(entry.roomTypeId, entry.roomTypeID, object(entry.roomType).roomTypeID) === search.roomTypeId
+      && identifier(entry.ratePlanId, entry.ratePlanID, object(entry.ratePlan).ratePlanId, object(entry.ratePlan).id) === search.ratePlanId,
+    );
     // Upstream trả quantity = 0 kể cả khi rate vẫn bán được, nên hết phòng chỉ có thể
     // suy ra từ việc không còn bản ghi nào.
     if (!item) throw new AppError(404, "NO_AVAILABILITY", "Hạng phòng này không còn khả dụng");
@@ -280,7 +303,7 @@ export class CloudHmsBedbankService implements BedbankService {
     return {
       propertyId: search.propertyId,
       roomTypeId: search.roomTypeId,
-      roomTypeName: string(roomType.name, string(roomType.code, "Hạng phòng")),
+      roomTypeName: roomTypeLabel(roomType),
       ratePlanId: search.ratePlanId,
       ratePlanName: string(ratePlan.name, string(ratePlan.rateCode, "Giá tiêu chuẩn")),
       quantity: number(item.quantity),

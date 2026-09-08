@@ -1,8 +1,8 @@
-# NT Travel Bedbank V1 Customer UAT
+# NT Travel Bedbank Customer UAT
 
 ## Scope
 
-V1 is an internal, read-only tool. It authenticates NT Travel staff and displays CloudHMS properties, availability, room/rate plans, net price, tax, daily price and policies. It must not create, update, commit or cancel bookings.
+The internal tool authenticates staff, displays availability and rates, creates Prospect bookings and explicitly confirms them as Reserved after guarantee review. Staff can reopen their own requests. Updating/cancelling bookings and searching reservations created outside this app are outside this release.
 
 ## Preconditions
 
@@ -30,7 +30,15 @@ V1 is an internal, read-only tool. It authenticates NT Travel staff and displays
 | EMPTY-01 | Search a known sold-out stay | Clear no-availability state; no stale rate detail |
 | ERROR-01 | Simulate CloudHMS timeout/rate limit | Safe retryable error; no secret or raw upstream body shown |
 | SECURITY-01 | Inspect authenticated API responses | `Cache-Control: private, no-store`; secure HttpOnly cookies; hardened headers |
-| SCOPE-01 | Inspect UI and network activity | No booking create/update/commit/cancel control or request exists |
+| BOOK-01 | Select a rate and complete guest details for each room | Exact dates/rate/room count; policies visible before creation |
+| BOOK-02 | Create booking, then inspect before confirming | Prospect displayed as pending; no automatic commit or email |
+| BOOK-03 | Review guarantees and explicitly confirm | Every reservation becomes Reserved; confirmation numbers retained |
+| BOOK-04 | Change price, inventory, or guarantee between steps | Mutation is blocked until current conditions are reviewed |
+| BOOK-05 | Double submit, lose response, restart BFF, reopen own requests | One upstream create/commit per request; uncertain states require reconciliation |
+| BOOK-06 | Fail only one reservation in batch commit | No whole-booking success; individual outcomes retained |
+| BOOK-07 | Access another staff member's booking ID | 404; guest data is not disclosed |
+| BOOK-08 | Change dates after loading room results | Old room/detail selection is cleared |
+| SCOPE-01 | Inspect booking network activity | Only explicit create/confirm writes; mock clearly identified; no update/cancel requests |
 | UX-01 | Test supported desktop/mobile widths and keyboard flow | No blocking overflow; labels, focus and errors remain usable |
 
 ## Data reconciliation record

@@ -34,7 +34,12 @@ export const searchRequestSchema = z.object({
 import type { SearchRequest } from "../shared/contracts.js";
 export const parseSearchRequest = (input: unknown): SearchRequest => searchRequestSchema.parse(input);
 
-export const propertySchema = z.object({ id: z.string(), name: z.string(), city: z.string(), imageUrl: z.string().url().optional() });
+// CloudHMS trả GUID toàn số 0 thay cho ID thật ở một số endpoint. Chuỗi đó qua được `z.string()`
+// nhưng vô dụng với mọi call tiếp theo, nên hợp đồng đầu ra phải chặn nó ngay tại biên.
+const ZERO_GUID = "00000000-0000-0000-0000-000000000000";
+const upstreamId = z.string().min(1).refine((value) => value !== ZERO_GUID, "CloudHMS trả định danh rỗng");
+
+export const propertySchema = z.object({ id: upstreamId, name: z.string(), city: z.string(), imageUrl: z.string().url().optional() });
 
 export const hotelAvailabilitySchema = propertySchema.extend({
   quantity: z.number().int().nonnegative(),
@@ -43,11 +48,11 @@ export const hotelAvailabilitySchema = propertySchema.extend({
 });
 
 export const roomAvailabilitySchema = z.object({
-  propertyId: z.string(),
-  roomTypeId: z.string(),
-  roomTypeName: z.string(),
-  ratePlanId: z.string(),
-  ratePlanName: z.string(),
+  propertyId: upstreamId,
+  roomTypeId: upstreamId,
+  roomTypeName: z.string().min(1),
+  ratePlanId: upstreamId,
+  ratePlanName: z.string().min(1),
   quantity: z.number().int().nonnegative(),
   total: z.number().nonnegative(),
   average: z.number().nonnegative(),
@@ -64,3 +69,19 @@ export const rateDetailSchema = roomAvailabilitySchema.extend({
 
 export const roomSearchSchema = searchRequestSchema.extend({ propertyId: z.string().min(1) });
 export const detailSearchSchema = roomSearchSchema.extend({ roomTypeId: z.string().min(1), ratePlanId: z.string().min(1) });
+
+export const bookingGuestSchema = z.object({
+  firstName: z.string().trim().min(1).max(100), lastName: z.string().trim().min(1).max(100),
+  email: z.string().trim().email().max(254), phoneNumber: z.string().trim().regex(/^\+?[0-9 ()-]{7,25}$/),
+});
+export const bookingCreateSchema = detailSearchSchema.extend({
+  requestId: z.uuid(), expectedTotal: z.number().positive().max(1e12), currency: z.string().regex(/^[A-Z]{3}$/),
+  guests: z.array(bookingGuestSchema).min(1).max(8), notes: z.string().trim().max(1000).default(""),
+  acceptedPolicies: z.literal(true),
+}).superRefine((value, context) => {
+  if (value.guests.length !== value.rooms.length) context.addIssue({ code: "custom", path: ["guests"], message: "Cần một khách đại diện cho mỗi phòng" });
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Ho_Chi_Minh", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  if (value.arrivalDate < today) context.addIssue({ code: "custom", path: ["arrivalDate"], message: "Ngày nhận phòng đã qua" });
+  if ((Date.parse(value.departureDate) - Date.parse(value.arrivalDate)) / 86_400_000 > 30) context.addIssue({ code: "custom", path: ["departureDate"], message: "Mỗi đặt phòng hỗ trợ tối đa 30 đêm" });
+});
+export const bookingConfirmSchema = z.object({ guaranteeVersion: z.string().regex(/^[a-f0-9]{64}$/), acceptedGuarantee: z.literal(true) });

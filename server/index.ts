@@ -8,24 +8,38 @@ import { CloudHmsClient } from "./cloudhms/client.js";
 import { MockBedbankService } from "./cloudhms/mock.js";
 import { loadConfig } from "./config.js";
 import { shutdownServer } from "./runtime.js";
+import { BookingService } from "./bookings/service.js";
+import { MemoryBookingStore, SupabaseBookingStore } from "./bookings/store.js";
+import { MockBookingGateway } from "./bookings/mock.js";
+import { CloudHmsBookingGateway } from "./cloudhms/bookings.js";
 
 const config = loadConfig();
 const auth = config.supabaseUrl && config.supabaseAnonKey && config.supabaseServiceRoleKey
   ? new SupabaseAuthService(config.supabaseUrl, config.supabaseAnonKey, config.supabaseServiceRoleKey)
   : new UnconfiguredAuthService();
+const cloudClient = new CloudHmsClient(config.cloudHms);
 const bedbank = config.cloudHms.mode === "live"
-  ? new CloudHmsBedbankService(new CloudHmsClient(config.cloudHms), config.cloudHms.distributionChannelId, config.cloudHms.organizationCode, config.cloudHms.concurrency)
+  ? new CloudHmsBedbankService(cloudClient, config.cloudHms.distributionChannelId, config.cloudHms.organizationCode, config.cloudHms.concurrency)
   : new MockBedbankService();
+const bookings = new BookingService(
+  config.cloudHms.mode === "live"
+    ? new CloudHmsBookingGateway(cloudClient, bedbank, { ...config.cloudHms, sourceCode: process.env.CLOUDHMS_BOOKING_SOURCE_CODE || "CRO" })
+    : new MockBookingGateway(bedbank),
+  config.cloudHms.mode === "live"
+    ? new SupabaseBookingStore(config.supabaseUrl, config.supabaseServiceRoleKey)
+    : new MemoryBookingStore(),
+);
 const publicDir = path.resolve(process.cwd(), "dist");
 const app = createApp({
   auth,
   bedbank,
+  bookings,
   production: config.nodeEnv === "production",
   publicDir,
   trustProxyHops: config.trustProxyHops,
   readinessCacheMs: config.readinessCacheMs,
   readiness: async () => {
-    await Promise.all([auth.health(), bedbank.health()]);
+    await Promise.all([auth.health(), bedbank.health(), bookings.health()]);
   },
 });
 

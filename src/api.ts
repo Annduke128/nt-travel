@@ -1,4 +1,4 @@
-import type { HotelAvailabilityDto, Profile, PropertyDto, RateDetailDto, RoomAvailabilityDto, SearchRequest } from "../shared/contracts";
+import type { BookingCreateRequest, BookingDto, BookingGuaranteesDto, HotelAvailabilityDto, Profile, PropertyDto, RateDetailDto, RoomAvailabilityDto, SearchRequest } from "../shared/contracts";
 
 export class ApiError extends Error {
   constructor(public readonly code: string, message: string, public readonly status: number) { super(message); }
@@ -30,6 +30,11 @@ export const bedbankApi = {
   hotels: (search: SearchRequest) => post<HotelAvailabilityDto[]>("/api/availability/hotels", search),
   rooms: (search: SearchRequest & { propertyId: string }) => post<RoomAvailabilityDto[]>("/api/availability/rooms", search),
   detail: (search: SearchRequest & { propertyId: string; roomTypeId: string; ratePlanId: string }) => post<RateDetailDto>("/api/availability/detail", search),
+  bookings: () => api<BookingDto[]>("/api/bookings"),
+  booking: (id: string) => api<BookingDto>(`/api/bookings/${encodeURIComponent(id)}`),
+  createBooking: (input: BookingCreateRequest) => post<BookingDto>("/api/bookings", input),
+  bookingGuarantees: (id: string) => api<BookingGuaranteesDto>(`/api/bookings/${encodeURIComponent(id)}/guarantees`),
+  confirmBooking: (id: string, guaranteeVersion: string) => post<BookingDto>(`/api/bookings/${encodeURIComponent(id)}/confirm`, { guaranteeVersion, acceptedGuarantee: true }),
   users: () => api<Profile[]>("/api/admin/users"),
   createUser: (input: { email: string; displayName: string; role: "admin" | "staff"; temporaryPassword: string }) => post<Profile>("/api/admin/users", input),
   updateUser: (userId: string, input: Record<string, string>) => api<Profile>(`/api/admin/users/${userId}`, { method: "PATCH", body: JSON.stringify(input) }),

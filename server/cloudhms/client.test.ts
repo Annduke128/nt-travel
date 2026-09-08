@@ -25,6 +25,14 @@ function response(status: number, body: unknown) {
 }
 
 describe("CloudHMS HTTP client", () => {
+  test("never replays a booking mutation after a server failure", async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(response(200, { access_token: "token", expires_in: 3600 }))
+      .mockImplementation(async () => response(500, { message: "failed" }));
+    const client = new CloudHmsClient(config, fetcher);
+    await expect(client.request("/common-trd/v1/crs/booking", { body: {}, retry: false })).rejects.toMatchObject({ code: "UPSTREAM_UNAVAILABLE" });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
   test("caches a client-credentials token before expiry", async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(response(200, { access_token: "token-1", expires_in: 3600 }))

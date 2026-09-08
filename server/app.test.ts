@@ -8,6 +8,9 @@ import { createApp } from "./app.js";
 import { AppError } from "./errors.js";
 import type { AuthService, BedbankService } from "./services.js";
 import { MockBedbankService } from "./cloudhms/mock.js";
+import { BookingService } from "./bookings/service.js";
+import { MockBookingGateway } from "./bookings/mock.js";
+import { MemoryBookingStore } from "./bookings/store.js";
 
 const staff = {
   userId: "staff-1",
@@ -42,6 +45,45 @@ function services() {
 }
 
 describe("BFF", () => {
+  test("staff creates, reopens, and confirms a mock booking through the authenticated API", async () => {
+    const deps = services();
+    const bedbank = new MockBedbankService();
+    const bookings = new BookingService(new MockBookingGateway(bedbank), new MemoryBookingStore());
+    const app = createApp({ ...deps, bedbank, bookings });
+    const input = { requestId: "22222222-2222-4222-8222-222222222222", destination: "Nha Trang", arrivalDate: "2099-06-01", departureDate: "2099-06-03",
+      rooms: [{ adults: 2, children: 0, infants: 0 }], propertyId: "mock-nha-trang", roomTypeId: "deluxe-ocean", ratePlanId: "breakfast-flex",
+      expectedTotal: 4900000, currency: "VND", guests: [{ firstName: "An", lastName: "Nguyen", email: "guest@example.com", phoneNumber: "0912345678" }], notes: "", acceptedPolicies: true };
+    const created = await request(app).post("/api/bookings").set("Cookie", "nt_access=access").send(input);
+    expect(created.status).toBe(201);
+    expect(created.body.data.status).toBe("created");
+    const duplicate = await request(app).post("/api/bookings").set("Cookie", "nt_access=access").send(input);
+    expect(duplicate.body.data.reservations).toEqual(created.body.data.reservations);
+    const terms = await request(app).get(`/api/bookings/${input.requestId}/guarantees`).set("Cookie", "nt_access=access");
+    expect(terms.status).toBe(200);
+    const confirmed = await request(app).post(`/api/bookings/${input.requestId}/confirm`).set("Cookie", "nt_access=access")
+      .send({ guaranteeVersion: terms.body.data.version, acceptedGuarantee: true });
+    expect(confirmed.body.data.status).toBe("confirmed");
+    const list = await request(app).get("/api/bookings").set("Cookie", "nt_access=access");
+    expect(list.body.data).toHaveLength(1);
+    expect(list.body.data[0].status).toBe("confirmed");
+    vi.mocked(deps.auth.authenticate).mockResolvedValue({ ...staff, userId: "other" });
+    expect((await request(app).get(`/api/bookings/${input.requestId}`).set("Cookie", "nt_access=access")).status).toBe(404);
+  });
+
+  test("forced-password users cannot create bookings", async () => {
+    const deps = services();
+    vi.mocked(deps.auth.authenticate).mockResolvedValue({ ...staff, mustChangePassword: true });
+    expect((await request(createApp(deps)).post("/api/bookings").set("Cookie", "nt_access=access").send({})).status).toBe(403);
+  });
+  test("booking creation requires authentication", async () => {
+    const response = await request(createApp(services())).post("/api/bookings").send({});
+    expect(response.status).toBe(401);
+  });
+
+  test("booking creation validates guest and quote before calling the service", async () => {
+    const response = await request(createApp(services())).post("/api/bookings").set("Cookie", "nt_access=access").send({});
+    expect(response.status).toBe(400);
+  });
   test("liveness is public and independent from dependency readiness", async () => {
     const readiness = vi.fn(async () => { throw new Error("upstream unavailable"); });
     const app = createApp({ ...services(), readiness });
@@ -158,6 +200,41 @@ describe("BFF", () => {
     expect(response.status).toBe(400);
     expect(response.body.error.code).toBe("VALIDATION_ERROR");
     expect(response.body.error.requestId).toBe(response.headers["x-request-id"]);
+  });
+
+  test("a room payload that breaks the response contract is not forwarded to the browser", async () => {
+    const deps = services();
+    // Đúng hình dạng lỗi đã gặp thật: get-room-availability trả GUID toàn số 0 ở cấp một, khiến
+    // mọi hạng phòng trùng ID và màn hình chi tiết giá nhận 400 RATE_PLAN_NOT_FOUND.
+    vi.mocked(deps.bedbank.rooms).mockResolvedValue([{
+      propertyId: "p1", roomTypeId: "00000000-0000-0000-0000-000000000000", roomTypeName: "Hạng phòng",
+      ratePlanId: "00000000-0000-0000-0000-000000000000", ratePlanName: "BABBAG",
+      quantity: 10, total: 5_400_000, average: 2_700_000, currency: "VND",
+    }]);
+    const app = createApp(deps);
+
+    const response = await request(app).post("/api/availability/rooms").set("Cookie", "nt_access=access")
+      .send({ destination: "Tây Ninh", arrivalDate: "2026-09-28", departureDate: "2026-09-30", rooms: [{ adults: 2, children: 0, infants: 0 }], propertyId: "p1" });
+
+    expect(response.status).toBe(503);
+    expect(response.body.error.code).toBe("UPSTREAM_UNAVAILABLE");
+  });
+
+  test("a valid room payload still reaches the browser unchanged", async () => {
+    const deps = services();
+    const room = {
+      propertyId: "p1", roomTypeId: "4ea4ea04-4572-652a-7bd1-ce2c772379f8", roomTypeName: "Presidental Suite",
+      ratePlanId: "9fb9d6df-6c05-4202-a08e-57d44f8ce8ae", ratePlanName: "BABBAG",
+      quantity: 10, total: 5_400_000, average: 2_700_000, tax: 0, currency: "VND", maxOccupancy: 8,
+    };
+    vi.mocked(deps.bedbank.rooms).mockResolvedValue([room]);
+    const app = createApp(deps);
+
+    const response = await request(app).post("/api/availability/rooms").set("Cookie", "nt_access=access")
+      .send({ destination: "Tây Ninh", arrivalDate: "2026-09-28", departureDate: "2026-09-30", rooms: [{ adults: 2, children: 0, infants: 0 }], propertyId: "p1" });
+
+    expect(response.status).toBe(200);
+    expect(response.body.data).toEqual([room]);
   });
 
   test("staff cannot call admin APIs", async () => {

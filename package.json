@@ -21,6 +21,8 @@
     "lint": "oxlint src server shared",
     "bootstrap:admin": "tsx server/auth/bootstrap-admin.ts",
     "bootstrap:admin:production": "node server-dist/server/auth/bootstrap-admin.js",
+    "check:cloudhms": "tsx server/cloudhms/connectivity.ts",
+    "check:cloudhms:production": "node server-dist/server/cloudhms/connectivity.js",
     "smoke:cloudhms": "tsx server/cloudhms/smoke.ts",
     "smoke:cloudhms:production": "node server-dist/server/cloudhms/smoke.js",
     "test": "RAYON_NUM_THREADS=1 vitest run --pool=forks --maxWorkers=1 --no-file-parallelism",

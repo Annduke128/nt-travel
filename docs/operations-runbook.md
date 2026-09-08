@@ -10,7 +10,7 @@ Required runtime:
 - Container base pinned in `Dockerfile`.
 - HTTPS at the edge.
 - A Supabase project dedicated to the environment.
-- Approved read-only CloudHMS credentials for the same environment.
+- Approved CloudHMS credentials for the same environment, with booking create/commit access for this release.
 
 ## Required secrets and configuration
 
@@ -34,6 +34,7 @@ Store secrets in the deployment platform secret store, never in an image or Git:
 | `CLOUDHMS_ORGANIZATION_CODE` | yes | Business code such as `Vingroup` |
 | `CLOUDHMS_DISTRIBUTION_CHANNEL_ID` | yes | Approved channel |
 | `CLOUDHMS_REQUESTOR_ID` | yes | Approved requestor |
+| `CLOUDHMS_BOOKING_SOURCE_CODE` | tenant-dependent | Defaults to `CRO` from the collection description; verify with CiHMS (`WBS` appears in the sample body) |
 
 The reverse proxy must overwrite, not append untrusted, `X-Forwarded-For`, `X-Forwarded-Host`, and `X-Forwarded-Proto`.
 
@@ -61,6 +62,33 @@ supabase db push --linked
 
 Only apply reviewed migrations. The current migration is additive; future migrations must remain backward-compatible for at least one application release so image rollback remains safe.
 
+The booking release requires `202609080001_bookings.sql` before the new image starts. Readiness now
+checks access to this table. It holds guest details and a durable request ID; only the BFF service role
+can read/write it. UI/API access is restricted to the staff member who created the request.
+
+## Booking operations
+
+Create produces `Prospect`; staff must review the guarantee conditions and explicitly confirm to
+obtain `Reserved`. Confirm sends `isSendMail=false`. No payment is collected by this application.
+See [integration flow](cihms-integration.md) and [booking UAT](customer-uat.md).
+
+Before using live writes, reconcile tenant source code, per-room prices, allotment eligibility,
+guarantee amounts and statuses with CiHMS in approved UAT. Local automated checks exercise mock
+and collection fixtures, and do not prove the tenant accepts live writes.
+
+Never replay create/commit after a timeout. The unique request row and atomic state transition
+prevent repeated writes for the same request ID across retries, workers and restarts. They do not
+deduplicate two intentionally different request IDs.
+
+For `attention` or a lingering `creating`/`confirming` row, use the displayed `NT-{requestId}`
+reference and reservation IDs to reconcile with CiHMS. The app's refresh action reads its stored
+state; it does not query CiHMS or resolve an ambiguous write automatically. Do not delete the row
+or reset its state to retry. Escalate to operations for a reviewed reconciliation. Partially
+confirmed batches retain known per-room outcomes and never show whole-booking success.
+
+Mock requests are memory-only, are visibly labeled in booking details/history, and disappear when
+the BFF restarts. Production must use live mode with the durable Supabase store.
+
 ## Initial admin
 
 Run once as an interactive one-off container. Pipe the password over stdin; never place it in shell history:
@@ -73,6 +101,26 @@ docker run --rm -i --env-file /secure/path/nt-travel.env \
 ```
 
 The admin must sign in and replace the temporary password before other operations.
+
+## Layered connectivity check
+
+Run this **before** the smoke test whenever credentials, hosts or the tenant change:
+
+```bash
+SMOKE_PROPERTY_ID=<property-uuid> npm run check:cloudhms
+```
+
+It walks the six layers in order — identity token, `/pms-property/hotels/info`, `/pms-property/room-type`,
+`get-hotel-availability`, `get-room-availability`, `get-room-detail-availability` — and prints one
+JSON line per layer with the real HTTP status. Unlike the smoke test it never fails fast, and an
+empty availability array is reported as `emptyAvailability: true` on a passing layer rather than as
+an error, so "wrong credential", "token rejected by CRS", "wrong distribution channel" and "no rooms
+on those dates" stay distinguishable.
+
+`SMOKE_ARRIVAL_DATE` / `SMOKE_DEPARTURE_DATE` (default today +30 / +32) and `SMOKE_ADULTS` (default 2)
+are optional. The script never prints the client secret or the access token — only whitelisted JWT
+claims, which is how a token minted by one environment's identity host is caught being sent to
+another environment's CRS host.
 
 ## Read-only integration smoke
 
@@ -89,10 +137,10 @@ docker run --rm --env-file /secure/path/nt-travel.env \
 
 The smoke test reads property, hotel availability, room/rate availability and rate detail. It does not create or mutate a booking.
 
-Set `SMOKE_DUMP_SHAPE=1` for the first live run. `get-room-availability` is the only endpoint the
-approved collection documents without a populated sample, so the mapper for it is derived from the
-`get-hotel-availability` rate envelope. The flag prints the top-level key names (never values) of the
-real response so `server/cloudhms/fixtures/room-availability.json` can be locked to the true shape.
+`SMOKE_DUMP_SHAPE=1` prints the top-level key names (never values) of the raw
+`get-room-availability` response. It is no longer needed for the initial rollout —
+`server/cloudhms/fixtures/room-availability.json` was locked to a live capture on 2026-08-29 — but
+keep using it whenever the tenant or the CloudHMS contract changes.
 
 Check the smoke output before routing traffic:
 
@@ -103,26 +151,54 @@ Check the smoke output before routing traffic:
   before customer sign-off.
 - `hotelCount` must match the number of properties the destination really has in the catalog.
 
-## CloudHMS contract questions to confirm before GO
+## CloudHMS contract questions
 
-The repository cannot resolve these; they need a written answer from CloudHMS.
+Answers marked **[verified 2026-08-29]** were established by running `npm run check:cloudhms` against
+identity `identity.stg.hulk.cloudhms.io` + CRS `api.beta.cloudhms.io`, org `vingroup`, property
+`5751` / `5d60c1ad-3ee7-7388-6907-0a3f5fcc093b`, channel `7e504b27-9a93-49af-8ccf-d73da1f778a8`.
+They hold for that tenant on staging; re-confirm against the production tenant before GO.
 
-1. Does `/connect/token` require `organization_id` in the form body, and which value applies to
-   NT Travel? The client now sends `CLOUDHMS_ORGANIZATION_ID` there, matching the approved collection.
+1. **[verified 2026-08-29]** `/connect/token` accepts `organization_id` in the form body and returns
+   an 8-hour `Bearer` token (`iss: https://identity.stg.hulk.cloudhms.io`, `aud: resource-api-ams`,
+   `scope: hms-scope`). The token carries `organization`, `organization_code` and `organization_id`
+   claims, so the tenant is bound at token issue time. Still to confirm: whether the field is
+   *mandatory* and which value applies to the production tenant.
 2. Are the `x-organization-id`, `x-organization-code`, `x-distribution-channel-id` and
    `x-requestor-id` headers required for read-only endpoints? They appear in no request in the
-   collection and are no longer sent.
-3. The `organization` body field appears only on `get-room-availability` in the collection (value
-   `"alpha"`). We send `CLOUDHMS_ORGANIZATION_CODE` on all three availability calls — is that correct,
-   and is the field mandatory on `get-hotel-availability` and `get-room-detail-availability`?
-4. Does `get-room-detail-availability` return `totalTaxAmount` or `rates[].taxAmount` in production,
-   or is tax only exposed by `get-room-availability`?
-5. What does a rate with `totalAmount = 0` and `quantity > 0` mean? We treat it as a rate plan with no
-   price loaded for the distribution channel and exclude it.
-6. What is the real maximum page size of `/pms-property/hotels/info` and `/pms-property/room-type`?
-   The sample caps a requested 50 at 30.
+   collection and are no longer sent. **[verified 2026-08-29]** all five read-only endpoints answer
+   200 without them, so they are not required for reads. Booking flows are untested.
+3. **[verified 2026-08-29]** All three availability calls accept `organization` with the lowercase
+   tenant code (`vingroup`). Whether the field is mandatory on `get-hotel-availability` and
+   `get-room-detail-availability` is still unconfirmed — it was sent on every call.
+4. **[verified 2026-08-29]** Tax is exposed **only** by `get-room-availability`, as
+   `totalTaxAmount: { amount, currencyCode }` (value `0` for this tenant).
+   `get-room-detail-availability` returns neither `totalTaxAmount` nor `rates[].taxAmount`, so
+   `RateDetailDto.tax` is always absent and the UI shows "chưa có dữ liệu" on the detail panel while
+   the room list shows `0 ₫`. Confirm with CloudHMS that a zero tax is genuinely correct here.
+5. **[verified 2026-08-29 — the premise was wrong]** No rate on this tenant has
+   `totalAmount = 0`. `totalAmount` is nested **twice**
+   (`{ amount: { amount: 5400000, currencyCode: "VND" } }`) while `averageAmount` and
+   `totalTaxAmount` are nested once. Any reader that unwraps a single level reads every amount as
+   `0`; `nestedAmount` in `bedbank.ts` handles this, shallower readers must not be added.
+   The meaning of a genuine zero-priced rate is still an open question.
+6. **[verified 2026-08-29]** `/pms-property/hotels/info` caps the page size at **100**, not 30:
+   requesting `limit=200` returns `limit: 100` with all 58 properties on page 0. `bedbank.ts`
+   compares against the response's own `limit`, which is correct.
 7. Confirm `roomOccupancy` is the occupancy of a single room alongside `numberOfRoom`. Is there any way
    to query rooms with different occupancies in one request?
+8. **[verified 2026-08-29 — new]** In `get-room-availability` the top-level `roomTypeId` and
+   `ratePlanId` are the all-zero GUID `00000000-0000-0000-0000-000000000000` on every rate; the
+   usable identifiers live in `roomType.roomTypeID` and `ratePlan.id` / `ratePlan.ratePlanId`.
+   Passing the zero GUIDs to `get-room-detail-availability` returns HTTP 400
+   `RATE_PLAN_NOT_FOUND`; passing the nested ones returns 200. `bedbank.ts` now skips the zero GUID
+   and falls back to the nested id, and the response schemas reject it at the BFF boundary. Still ask
+   CloudHMS whether the zero GUID is intended — if they fix it upstream the fallback becomes dead code.
+9. **[verified 2026-08-29 — new]** `get-room-availability` nests room-type metadata under keys
+   `roomTypeID` / `roomTypeCode` / `roomTypeName`, whereas `/pms-property/room-type` uses
+   `id` / `code` / `name`. The two shapes are not interchangeable.
+10. **[observed 2026-08-29]** `/pms-property/hotels/info` is usually fast (~750 ms, 5/5 successful
+    in a row) but was seen once exceeding the 12 s `CLOUDHMS_TIMEOUT_MS` and once returning HTTP 504
+    after 29 s. Confirm the upstream SLA before settling on a production timeout.
 
 ## Health and rollout
 

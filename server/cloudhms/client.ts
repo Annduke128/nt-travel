@@ -3,7 +3,7 @@ import type { CloudHmsConfig } from "../config.js";
 import { AppError } from "../errors.js";
 
 type Fetcher = typeof fetch;
-type RequestOptions = { method?: "GET" | "POST"; body?: unknown; correlationId?: string };
+type RequestOptions = { method?: "GET" | "POST"; body?: unknown; correlationId?: string; retry?: boolean };
 type Token = { value: string; expiresAt: number };
 
 export class CloudHmsClient {
@@ -71,13 +71,13 @@ export class CloudHmsClient {
         throw new AppError(503, "UPSTREAM_UNAVAILABLE", "CloudHMS không phản hồi");
       }
       console.info(JSON.stringify({ service: "cloudhms", path, status: response.status, latencyMs: Date.now() - startedAt, correlationId }));
-      if (response.status === 401 && !didRefresh) {
+      if (response.status === 401 && !didRefresh && options.retry !== false) {
         this.token = undefined;
         token = await this.acquireToken(true);
         didRefresh = true;
         continue;
       }
-      if ((response.status === 429 || response.status >= 500) && transientAttempts < 2) {
+      if ((response.status === 429 || response.status >= 500) && transientAttempts < 2 && options.retry !== false) {
         transientAttempts += 1;
         await new Promise((resolve) => setTimeout(resolve, 50 * 2 ** transientAttempts));
         continue;

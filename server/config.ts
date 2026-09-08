@@ -53,8 +53,7 @@ const environmentSchema = z.object({
 export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ServerConfig {
   const value = environmentSchema.parse(environment);
   if (value.CLOUDHMS_MODE === "live") {
-    // CLOUDHMS_REQUESTOR_ID chưa được luồng read-only V1 sử dụng; giữ bắt buộc theo runbook
-    // để dành cho luồng booking sau này và để phát hiện secret store thiếu cấu hình sớm.
+    // Requestor ID được dùng trong payload tạo booking.
     const required = [
       "CLOUDHMS_CLIENT_ID",
       "CLOUDHMS_CLIENT_SECRET",

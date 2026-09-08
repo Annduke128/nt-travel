@@ -1,6 +1,13 @@
-# NT Travel Bedbank v1
+# NT Travel Bedbank
 
-Ứng dụng nội bộ read-only để nhân viên NT Travel đăng nhập, tìm property CloudHMS, xem room/rate plan, giá từng ngày, thuế và chính sách. V1 không tạo, commit, cập nhật hoặc hủy booking.
+Ứng dụng nội bộ để nhân viên NT Travel tìm phòng, xem giá net và chính sách, tạo và xác nhận đặt phòng qua CiHMS.
+
+Luồng đặt phòng: **Tìm phòng → Xem hạng phòng → Đặt phòng → Nhập khách → Tạo đặt phòng → Đọc điều kiện bảo đảm → Xác nhận đặt phòng**.
+Mục **Đặt phòng của tôi** hiển thị 100 yêu cầu gần nhất do nhân viên đang đăng nhập tạo qua ứng dụng, có tìm theo mã, khách sạn và khách.
+Mỗi phòng cần một khách đại diện. Hiện hỗ trợ tối đa 8 phòng có cùng số khách, tối đa 30 đêm; chưa hỗ trợ cập nhật/hủy hoặc tìm booking được tạo bên ngoài ứng dụng.
+
+Live cần áp dụng migration `supabase/migrations/202609080001_bookings.sql` trước khi chạy bản mới. Booking live được lưu bền vững trong Supabase; mock dùng bộ nhớ và hiển thị nhãn thử nghiệm.
+Xem [hướng dẫn tích hợp CiHMS](docs/cihms-integration.md) để biết thứ tự API và xử lý lỗi.
 
 ## Chạy local
 

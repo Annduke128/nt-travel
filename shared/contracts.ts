@@ -12,3 +12,21 @@ export type RoomAvailabilityDto = {
   quantity: number; total: number; average: number; tax?: number; currency: string; imageUrl?: string; maxOccupancy?: number;
 };
 export type RateDetailDto = RoomAvailabilityDto & { dailyRates: { date: string; amount: number; tax?: number }[]; policies: { type: string; description: string }[] };
+
+export type BookingGuest = { firstName: string; lastName: string; email: string; phoneNumber: string };
+export type BookingCreateRequest = SearchRequest & {
+  requestId: string; propertyId: string; roomTypeId: string; ratePlanId: string;
+  expectedTotal: number; currency: string; guests: BookingGuest[]; notes: string; acceptedPolicies: true;
+};
+export type BookingReservation = { id: string; confirmationNumber: string; status: string; error?: string };
+export type BookingStatus = "creating" | "created" | "confirming" | "confirmed" | "attention";
+export type BookingDto = {
+  id: string; reference: string; createdAt: string; mode: "mock" | "live"; status: BookingStatus;
+  propertyName: string; roomTypeName: string; ratePlanName: string; total: number; currency: string;
+  request: BookingCreateRequest; reservations: BookingReservation[]; message?: string;
+};
+export type BookingGuarantee = {
+  reservationId: string; amount: number; currency: string; dueDate?: string;
+  methods: { id: string; type: string; amount: number; currency: string; stayDate?: string }[];
+};
+export type BookingGuaranteesDto = { version: string; guarantees: BookingGuarantee[] };

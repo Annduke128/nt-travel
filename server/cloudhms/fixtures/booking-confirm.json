@@ -1,0 +1,17 @@
+{
+  "data": {
+    "items": [
+      {
+        "errorMessages": [],
+        "reservation": {
+          "reservationID": "8ba76e6b-f425-4238-9bc0-b2da47d1834b",
+          "confirmationNumber": "VOPQ24410",
+          "status": "Reserved"
+        }
+      }
+    ]
+  },
+  "isSuccess": true,
+  "code": 0,
+  "errors": []
+}

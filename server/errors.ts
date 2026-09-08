@@ -8,7 +8,11 @@ export type ErrorCode =
   | "PASSWORD_CHANGE_REQUIRED"
   | "UPSTREAM_UNAVAILABLE"
   | "UPSTREAM_RATE_LIMITED"
-  | "NO_AVAILABILITY";
+  | "NO_AVAILABILITY"
+  | "PRICE_CHANGED"
+  | "BOOKING_CONFLICT"
+  | "BOOKING_REJECTED"
+  | "GUARANTEE_CHANGED";
 
 export class AppError extends Error {
   constructor(

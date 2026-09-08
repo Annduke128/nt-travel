@@ -1,0 +1,66 @@
+{
+  "data": {
+    "rates": [
+      {
+        "property": {
+          "id": "c67377fc-d81d-4208-add9-47e32b69f998",
+          "name": "VinOasis Phú Quốc"
+        },
+        "rates": [
+          {
+            "roomTypeID": "5051e26c-e710-4028-90ae-ad929b0309e7",
+            "ratePlanID": "1604924a-a9c1-4197-b013-2e61d6a193d0",
+            "totalAmount": {
+              "amount": {
+                "amount": 1600000,
+                "currencyCode": "VND"
+              }
+            },
+            "averageAmount": {
+              "amount": 800000,
+              "currencyCode": "VND"
+            },
+            "totalTaxAmount": {
+              "amount": 0,
+              "currencyCode": "VND"
+            },
+            "quantity": 172,
+            "rateAvailablity": {
+              "propertyId": "c67377fc-d81d-4208-add9-47e32b69f998",
+              "ratePlanId": "1604924a-a9c1-4197-b013-2e61d6a193d0",
+              "roomTypeId": "5051e26c-e710-4028-90ae-ad929b0309e7",
+              "roomTypeCode": "BKSDG",
+              "ratePlanCode": "PHMS-T18",
+              "quantity": 172,
+              "allotments": [
+                {
+                  "id": "103688ee-b772-45a6-ab51-2129610d9e57",
+                  "allotmentId": "103688ee-b772-45a6-ab51-2129610d9e57",
+                  "allotmentType": "normal",
+                  "code": "ALLOTMENT_VPT_VPT",
+                  "name": "ALLOTMENT_VPT_VPT",
+                  "quantity": 172,
+                  "dcId": "00000000-0000-0000-0000-000000000000",
+                  "requirePayment": true
+                },
+                {
+                  "id": "a81f9465-294d-4c5e-8630-3d97e8accfd4",
+                  "allotmentId": "a81f9465-294d-4c5e-8630-3d97e8accfd4",
+                  "allotmentType": "normal",
+                  "code": "ALLOTMENT_VPT_PHMS1",
+                  "name": "ALLOTMENT_VPT_PHMS1",
+                  "quantity": 100,
+                  "dcId": "00000000-0000-0000-0000-000000000000",
+                  "requirePayment": true
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "isSuccess": true,
+  "code": 0,
+  "errors": []
+}

@@ -4,7 +4,8 @@ import cookieParser from "cookie-parser";
 import express, { type NextFunction, type Request, type Response } from "express";
 import helmet from "helmet";
 import { z } from "zod";
-import { detailSearchSchema, roomSearchSchema, searchRequestSchema } from "./contracts.js";
+import { bookingCreateSchema, bookingConfirmSchema, detailSearchSchema, hotelAvailabilitySchema, propertySchema, rateDetailSchema, roomAvailabilitySchema, roomSearchSchema, searchRequestSchema } from "./contracts.js";
+import type { BookingService } from "./bookings/service.js";
 import { AppError, errorHandler, notFound } from "./errors.js";
 import type { AuthService, BedbankService, Profile } from "./services.js";
 
@@ -15,6 +16,7 @@ declare global {
 type Dependencies = {
   auth: AuthService;
   bedbank: BedbankService;
+  bookings?: BookingService;
   production?: boolean;
   publicDir?: string;
   readiness?: () => Promise<void>;
@@ -31,6 +33,23 @@ const asyncRoute = (handler: (request: Request, response: Response, next: NextFu
   (request: Request, response: Response, next: NextFunction) => void handler(request, response, next).catch(next);
 
 const routeId = (request: Request) => String(request.params.id);
+
+// Hợp đồng đầu ra chỉ có giá trị khi được kiểm tra. Không kiểm tra thì upstream đổi shape sẽ lọt
+// thẳng xuống trình duyệt — đã xảy ra thật: `get-room-availability` trả GUID toàn số 0 nên mọi
+// hạng phòng trùng ID và màn hình chi tiết giá nhận 400. Chặn tại biên và trả 503 thay vì để FE
+// render dữ liệu không dùng được.
+function contracted<T>(schema: z.ZodType<T>, value: unknown, request: Request): T {
+  const parsed = schema.safeParse(value);
+  if (parsed.success) return parsed.data;
+  console.error(JSON.stringify({
+    level: "error",
+    message: "Phản hồi CloudHMS không khớp hợp đồng",
+    path: request.path,
+    requestId: request.header("x-request-id"),
+    issues: parsed.error.issues.slice(0, 5).map((issue) => ({ path: issue.path.join("."), code: issue.code })),
+  }));
+  throw new AppError(503, "UPSTREAM_UNAVAILABLE", "Dữ liệu từ CloudHMS không dùng được");
+}
 
 function setSessionCookies(response: Response, session: { accessToken: string; refreshToken: string; expiresIn: number }, production: boolean) {
   const common = { httpOnly: true, secure: production, sameSite: "strict" as const, path: "/" };
@@ -68,6 +87,7 @@ function rateLimit(limit: number, windowMs: number, maxKeys: number) {
 export function createApp({
   auth,
   bedbank,
+  bookings,
   production = false,
   publicDir,
   readiness = async () => undefined,
@@ -186,10 +206,26 @@ export function createApp({
     response.status(204).end();
   }));
 
-  app.get("/api/properties", requireAuth, requireReady, asyncRoute(async (request, response) => response.json({ data: await bedbank.properties(String(request.query.query ?? "")) })));
-  app.post("/api/availability/hotels", requireAuth, requireReady, asyncRoute(async (request, response) => response.json({ data: await bedbank.hotels(searchRequestSchema.parse(request.body)) })));
-  app.post("/api/availability/rooms", requireAuth, requireReady, asyncRoute(async (request, response) => response.json({ data: await bedbank.rooms(roomSearchSchema.parse(request.body)) })));
-  app.post("/api/availability/detail", requireAuth, requireReady, asyncRoute(async (request, response) => response.json({ data: await bedbank.detail(detailSearchSchema.parse(request.body)) })));
+  app.get("/api/properties", requireAuth, requireReady, asyncRoute(async (request, response) => response.json({ data: contracted(z.array(propertySchema), await bedbank.properties(String(request.query.query ?? "")), request) })));
+  app.post("/api/availability/hotels", requireAuth, requireReady, asyncRoute(async (request, response) => response.json({ data: contracted(z.array(hotelAvailabilitySchema), await bedbank.hotels(searchRequestSchema.parse(request.body)), request) })));
+  app.post("/api/availability/rooms", requireAuth, requireReady, asyncRoute(async (request, response) => response.json({ data: contracted(z.array(roomAvailabilitySchema), await bedbank.rooms(roomSearchSchema.parse(request.body)), request) })));
+  app.post("/api/availability/detail", requireAuth, requireReady, asyncRoute(async (request, response) => response.json({ data: contracted(rateDetailSchema, await bedbank.detail(detailSearchSchema.parse(request.body)), request) })));
+
+  const bookingService = () => {
+    if (!bookings) throw new AppError(503, "UPSTREAM_UNAVAILABLE", "Dịch vụ đặt phòng chưa được cấu hình");
+    return bookings;
+  };
+  app.get("/api/bookings", requireAuth, requireReady, asyncRoute(async (request, response) => response.json({ data: await bookingService().list(request.profile!) })));
+  app.post("/api/bookings", requireAuth, requireReady, rateLimit(20, 60_000, rateLimitMaxKeys), asyncRoute(async (request, response) => {
+    const input = bookingCreateSchema.parse(request.body);
+    response.status(201).json({ data: await bookingService().create(request.profile!, input) });
+  }));
+  app.get("/api/bookings/:id", requireAuth, requireReady, asyncRoute(async (request, response) => response.json({ data: await bookingService().get(request.profile!, z.uuid().parse(routeId(request))) })));
+  app.get("/api/bookings/:id/guarantees", requireAuth, requireReady, asyncRoute(async (request, response) => response.json({ data: await bookingService().guarantees(request.profile!, z.uuid().parse(routeId(request))) })));
+  app.post("/api/bookings/:id/confirm", requireAuth, requireReady, rateLimit(20, 60_000, rateLimitMaxKeys), asyncRoute(async (request, response) => {
+    const input = bookingConfirmSchema.parse(request.body);
+    response.json({ data: await bookingService().confirm(request.profile!, z.uuid().parse(routeId(request)), input.guaranteeVersion) });
+  }));
 
   if (publicDir) {
     app.use(express.static(publicDir, {

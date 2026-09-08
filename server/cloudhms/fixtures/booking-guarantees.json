@@ -1,0 +1,88 @@
+{
+  "data": {
+    "reservationId": "d84e2a16-c2c8-481a-87df-83aa63c69086",
+    "guaranteeDate": "2026-04-16T11:45:03.4635043Z",
+    "guaranteeMethods": [
+      {
+        "id": "b5002a8e-4c4f-4591-8b42-baa123fe156f",
+        "reservationId": "d84e2a16-c2c8-481a-87df-83aa63c69086",
+        "amount": {
+          "amount": {
+            "amount": 4000003,
+            "currencyCode": "VND"
+          }
+        },
+        "stayDate": "2026-07-30T00:00:00.0000000",
+        "detail": {
+          "type": "Deposit"
+        }
+      },
+      {
+        "id": "b5002a8e-4c4f-4591-8b42-baa123fe156f",
+        "reservationId": "d84e2a16-c2c8-481a-87df-83aa63c69086",
+        "amount": {
+          "amount": {
+            "amount": 4000003,
+            "currencyCode": "VND"
+          }
+        },
+        "stayDate": "2026-07-31T00:00:00.0000000",
+        "detail": {
+          "type": "Deposit"
+        }
+      },
+      {
+        "id": "b5002a8e-4c4f-4591-8b42-baa123fe156f",
+        "reservationId": "d84e2a16-c2c8-481a-87df-83aa63c69086",
+        "amount": {
+          "amount": {
+            "amount": 4000003,
+            "currencyCode": "VND"
+          }
+        },
+        "stayDate": "2026-08-01T00:00:00.0000000",
+        "detail": {
+          "type": "Deposit"
+        }
+      },
+      {
+        "id": "b5002a8e-4c4f-4591-8b42-baa123fe156f",
+        "reservationId": "d84e2a16-c2c8-481a-87df-83aa63c69086",
+        "amount": {
+          "amount": {
+            "amount": 4000003,
+            "currencyCode": "VND"
+          }
+        },
+        "stayDate": "2026-08-02T00:00:00.0000000",
+        "detail": {
+          "type": "Deposit"
+        }
+      },
+      {
+        "id": "b5002a8e-4c4f-4591-8b42-baa123fe156f",
+        "reservationId": "d84e2a16-c2c8-481a-87df-83aa63c69086",
+        "amount": {
+          "amount": {
+            "amount": 4000003,
+            "currencyCode": "VND"
+          }
+        },
+        "stayDate": "2026-08-03T00:00:00.0000000",
+        "detail": {
+          "type": "Deposit"
+        }
+      }
+    ],
+    "guaranteeAmount": {
+      "amount": {
+        "amount": 20000015,
+        "currencyCode": "VND"
+      }
+    },
+    "dueDate": "2026-07-30T00:00:00.0000000"
+  },
+  "isSuccess": true,
+  "code": 0,
+  "errors": []
+}

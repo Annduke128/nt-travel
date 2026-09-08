@@ -1,0 +1,14 @@
+{
+  "data": {
+    "reservations": [
+      {
+        "reservationID": "52ccb695-fbd8-4ed4-bcf0-8a05a6412f58",
+        "confirmationNumber": "VOPQ24407",
+        "status": "Prospect"
+      }
+    ]
+  },
+  "isSuccess": true,
+  "code": 0,
+  "errors": []
+}

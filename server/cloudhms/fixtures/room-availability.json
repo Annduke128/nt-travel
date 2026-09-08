@@ -1,83 +1,141 @@
 {
   "data": {
-    "arrivalDate": "2026-04-22T00:00:00.0000000",
-    "departureDate": "2026-04-24T00:00:00.0000000",
+    "arrivalDate": "2026-09-28T00:00:00.0000000",
+    "departureDate": "2026-09-30T00:00:00.0000000",
     "propertyInfo": {
-      "id": "2dc6dc10-6fe4-493b-9278-00e00520d7e2",
-      "name": "Palace Gate Hotel",
-      "city": "Vietnam A Vietnam A Vietnam A Vietnam A Vietnam A",
-      "code": "VPCHTN",
-      "currencySymbol": "VND",
-      "status": true
+      "id": "5d60c1ad-3ee7-7388-6907-0a3f5fcc093b",
+      "name": "Hotel Tay Ninh 11",
+      "city": "",
+      "code": "5751",
+      "status": true,
+      "currencySymbol": "VND"
     },
     "roomAvailabilityRates": [
       {
-        "roomTypeID": "4ae8d255-b0ef-4a6f-ac17-0f89391fada4",
-        "ratePlanID": "78ab854c-780b-4239-8389-5c4f09560768",
+        "ratePlan": {
+          "id": "9fb9d6df-6c05-4202-a08e-57d44f8ce8ae",
+          "ratePlanId": "9fb9d6df-6c05-4202-a08e-57d44f8ce8ae",
+          "rateCode": "BABBAG",
+          "name": "BABBAG",
+          "currency": "VND"
+        },
+        "roomType": {
+          "roomTypeID": "4ea4ea04-4572-652a-7bd1-ce2c772379f8",
+          "roomTypeCode": "NX4N",
+          "roomTypeName": "Presidental Suite",
+          "maxOccupancy": 8,
+          "maxAdult": 5,
+          "maxChild": 3,
+          "thumbnails": [
+            {
+              "id": "1409ecd7-3074-4721-a209-76a70aaf2474",
+              "url": "https://aus-content.product.cloudhms.io/2019/10/30/ba26f949-90f9-4a2c-9ab6-477e817efc73__DSC2304.jpg",
+              "order": 1,
+              "type": "thumbnail"
+            }
+          ]
+        },
+        "ratePlanId": "00000000-0000-0000-0000-000000000000",
+        "roomTypeId": "00000000-0000-0000-0000-000000000000",
         "totalAmount": {
           "amount": {
-            "amount": 0,
+            "amount": 5400000,
             "currencyCode": "VND"
           }
         },
         "averageAmount": {
-          "amount": 0,
+          "amount": 2700000,
           "currencyCode": "VND"
         },
         "totalTaxAmount": {
           "amount": 0,
           "currencyCode": "VND"
         },
-        "quantity": 47,
-        "rateAvailablity": {
-          "propertyId": "c67377fc-d81d-4208-add9-47e32b69f998",
-          "roomTypeId": "4ae8d255-b0ef-4a6f-ac17-0f89391fada4",
-          "ratePlanId": "78ab854c-780b-4239-8389-5c4f09560768",
-          "roomTypeCode": "BKX0N",
-          "quantity": 47,
-          "taxAmount": 0,
-          "ratePlan": {
-            "id": "78ab854c-780b-4239-8389-5c4f09560768",
-            "ratePlanId": "78ab854c-780b-4239-8389-5c4f09560768",
-            "rateCode": "DNMP1",
-            "name": "DNMP1",
-            "currency": "VND"
-          }
-        }
+        "quantity": 10
       },
       {
-        "roomTypeID": "1634b9cc-19a0-47ca-9d93-0ff14270c0e3",
-        "ratePlanID": "1c6b89c1-a351-484c-8416-d36b1357f73d",
+        "ratePlan": {
+          "id": "9fb9d6df-6c05-4202-a08e-57d44f8ce8ae",
+          "ratePlanId": "9fb9d6df-6c05-4202-a08e-57d44f8ce8ae",
+          "rateCode": "BABBAG",
+          "name": "BABBAG",
+          "currency": "VND"
+        },
+        "roomType": {
+          "roomTypeID": "ef1cb9aa-92d2-1852-96ed-37c91e93997a",
+          "roomTypeCode": "KDLN",
+          "roomTypeName": "Deluxe Room King",
+          "maxOccupancy": 4,
+          "maxAdult": 5,
+          "maxChild": 2,
+          "thumbnails": [
+            {
+              "id": "ae8aeea6-09d6-4309-ac29-a75f5b8e5d26",
+              "url": "https://aus-content.product.cloudhms.io/2019/10/30/6a3e90e5-7aa1-4812-81d4-5386bcaa2d62_Deluxe King 1.png",
+              "order": 1,
+              "type": "thumbnail"
+            }
+          ]
+        },
+        "ratePlanId": "00000000-0000-0000-0000-000000000000",
+        "roomTypeId": "00000000-0000-0000-0000-000000000000",
         "totalAmount": {
           "amount": {
-            "amount": 1000000,
+            "amount": 5400000,
             "currencyCode": "VND"
           }
         },
         "averageAmount": {
-          "amount": 500000,
+          "amount": 2700000,
           "currencyCode": "VND"
         },
         "totalTaxAmount": {
           "amount": 0,
           "currencyCode": "VND"
         },
-        "quantity": 146,
-        "rateAvailablity": {
-          "propertyId": "c67377fc-d81d-4208-add9-47e32b69f998",
-          "roomTypeId": "1634b9cc-19a0-47ca-9d93-0ff14270c0e3",
-          "ratePlanId": "1c6b89c1-a351-484c-8416-d36b1357f73d",
-          "roomTypeCode": "ATSDG",
-          "quantity": 146,
-          "taxAmount": 0,
-          "ratePlan": {
-            "id": "1c6b89c1-a351-484c-8416-d36b1357f73d",
-            "ratePlanId": "1c6b89c1-a351-484c-8416-d36b1357f73d",
-            "rateCode": "RATE15PC",
-            "name": "RATE15PC",
-            "currency": "VND"
+        "quantity": 63
+      },
+      {
+        "ratePlan": {
+          "id": "9fb9d6df-6c05-4202-a08e-57d44f8ce8ae",
+          "ratePlanId": "9fb9d6df-6c05-4202-a08e-57d44f8ce8ae",
+          "rateCode": "BABBAG",
+          "name": "BABBAG",
+          "currency": "VND"
+        },
+        "roomType": {
+          "roomTypeID": "099f21f6-8c47-73c1-7bf2-c18e8022899a",
+          "roomTypeCode": "KBUN",
+          "roomTypeName": "Business Room King",
+          "maxOccupancy": 4,
+          "maxAdult": 5,
+          "maxChild": 1,
+          "thumbnails": [
+            {
+              "id": "abbd3fea-61cf-444b-ba0a-a57d512908eb",
+              "url": "https://aus-content.product.cloudhms.io/2019/10/30/497c2de7-dbcc-40ff-bc76-9ce4b9ca2246__DSC1983.jpg",
+              "order": 1,
+              "type": "thumbnail"
+            }
+          ]
+        },
+        "ratePlanId": "00000000-0000-0000-0000-000000000000",
+        "roomTypeId": "00000000-0000-0000-0000-000000000000",
+        "totalAmount": {
+          "amount": {
+            "amount": 5400000,
+            "currencyCode": "VND"
           }
-        }
+        },
+        "averageAmount": {
+          "amount": 2700000,
+          "currencyCode": "VND"
+        },
+        "totalTaxAmount": {
+          "amount": 0,
+          "currencyCode": "VND"
+        },
+        "quantity": 23
       }
     ]
   }
