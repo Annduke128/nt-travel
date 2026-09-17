@@ -35,6 +35,8 @@ Store secrets in the deployment platform secret store, never in an image or Git:
 | `CLOUDHMS_DISTRIBUTION_CHANNEL_ID` | yes | Approved channel |
 | `CLOUDHMS_REQUESTOR_ID` | yes | Approved requestor |
 | `CLOUDHMS_BOOKING_SOURCE_CODE` | tenant-dependent | Defaults to `CRO` from the collection description; verify with CiHMS (`WBS` appears in the sample body) |
+| `CLOUDHMS_TRAVEL_AGENT_NAME` | no | TravelAgent profile name on every reservation; defaults to `NT_Travel` |
+| `CLOUDHMS_TRAVEL_AGENT_PROFILE_ID` | once issued | CiHMS profileRefID of NT_Travel. Empty stores the name without linking a profile |
 
 The reverse proxy must overwrite, not append untrusted, `X-Forwarded-For`, `X-Forwarded-Host`, and `X-Forwarded-Proto`.
 
@@ -70,6 +72,11 @@ can read/write it. UI/API access is restricted to the staff member who created t
 
 Create produces `Prospect`; staff must review the guarantee conditions and explicitly confirm to
 obtain `Reserved`. Confirm sends `isSendMail=false`. No payment is collected by this application.
+Commit therefore sends `guaranteeInfos` (method ID as `guaranteePolicyId`, `detail.id` as `guaranteeRefID`, no
+`guaranteeValue`), which CiHMS records as `paymentStatus=No`, `settledAmount=0`. The former `guaranteeMethods` body was
+recorded as `paymentStatus=Complete`, `guaranteeType=Credit`; reservations committed before this change need correcting in CiHMS.
+Each reservation carries a `TravelAgent` profile from `CLOUDHMS_TRAVEL_AGENT_*`.
+To verify, read the reservation back with `POST /common-trd/v1/crs/reservation/search-free-text` using its confirmation number.
 See [integration flow](cihms-integration.md) and [booking UAT](customer-uat.md).
 
 Before using live writes, reconcile tenant source code, per-room prices, allotment eligibility,
@@ -199,6 +206,16 @@ They hold for that tenant on staging; re-confirm against the production tenant b
 10. **[observed 2026-08-29]** `/pms-property/hotels/info` is usually fast (~750 ms, 5/5 successful
     in a row) but was seen once exceeding the 12 s `CLOUDHMS_TIMEOUT_MS` and once returning HTTP 504
     after 29 s. Confirm the upstream SLA before settling on a production timeout.
+11. **[verified 2026-09-17]** Batch commit with `guaranteeMethods: [{ id }]` records the reservation as
+    `paymentStatus=Complete`, `guaranteeType=Credit` (5751237213, 5751237237). `guaranteeInfos:
+    [{ guaranteePolicyId: <method id>, guaranteeRefID: <detail.id> }]` records `paymentStatus=No`, `guaranteeType=No`,
+    `requestAmount` = guarantee total, `settledAmount=0` (5751237586, 5751237587; 5751237588 end to end through the app gateway). Using `detail.id` as the policy returns
+    400 `Guarantee Policy ID … is invalid`; adding `guaranteeValue: 0` returns a generic 400. Ask CiHMS to confirm this
+    mapping, since the collection describes `guaranteePolicyId` as a policy ID.
+12. **[verified 2026-09-17]** A `TravelAgent` profile with an empty `profileRefID` is stored by name only (no link, `taCode`
+    dropped). There is no profile lookup API in the collection; CiHMS must issue the NT_Travel profileRefID.
+13. **[verified 2026-09-17]** CiHMS truncates `Opera_TA_Rec_Loc` to 35 characters, so `NT-{requestId}` (39) is stored
+    without its last four characters. Reconcile by prefix or by reservation ID until the reference is shortened.
 
 ## Health and rollout
 

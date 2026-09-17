@@ -4,7 +4,7 @@ import type { BedbankService } from "../services.js";
 import type { CloudHmsClient } from "./client.js";
 import { AppError } from "../errors.js";
 import { rateDetailSchema } from "../contracts.js";
-type BookingConfig = { organizationCode: string; distributionChannelId: string; requestorId: string; sourceCode: string };
+type BookingConfig = { organizationCode: string; distributionChannelId: string; requestorId: string; sourceCode: string; travelAgentName: string; travelAgentProfileId: string };
 type Row = Record<string, unknown>;
 const object = (value: unknown): Row => value && typeof value === "object" && !Array.isArray(value) ? value as Row : {};
 const array = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
@@ -56,9 +56,10 @@ export function parseBookingGuarantee(payload: unknown): BookingGuarantee {
   const methods = array(data.guaranteeMethods).map((value) => {
     const row = object(value);
     const id = identifier(row.id);
+    const policyRefId = identifier(object(row.detail).id);
     const type = text(object(row.detail).type);
-    if (!id || !type || identifier(row.reservationId) !== reservationId) throw invalid();
-    return { id, type, ...money(row.amount), ...(row.stayDate ? { stayDate: text(row.stayDate).slice(0, 10) } : {}) };
+    if (!id || !policyRefId || !type || identifier(row.reservationId) !== reservationId) throw invalid();
+    return { id, policyRefId, type, ...money(row.amount), ...(row.stayDate ? { stayDate: text(row.stayDate).slice(0, 10) } : {}) };
   });
   // CiHMS repeats the same guarantee ID for each stay date; retain daily amounts for review.
   if (!methods.length) throw invalid();
@@ -110,6 +111,7 @@ export class CloudHmsBookingGateway implements BookingGateway {
         isSpecialRequestSpecified: Boolean(input.notes), specialRequests: input.notes ? [{ requestType: "BookerInstruction", requestContent: input.notes }] : [],
         isProfilesSpecified: true, profiles: [
           { firstName: actor.displayName, lastName: "", email: actor.email, profileRefID: "", profileType: "Booker" },
+          { firstName: this.config.travelAgentName, profileRefID: this.config.travelAgentProfileId, profileType: "TravelAgent" },
           { ...guest, profileRefID: "", profileType: "Guest", primarySearchValues: { email: guest.email, phoneNumber: guest.phoneNumber } },
         ],
         isRoomRatesSpecified: true, roomRates, isPackagesSpecified: false, packages: [],
@@ -131,8 +133,12 @@ export class CloudHmsBookingGateway implements BookingGateway {
     return results;
   }
   async confirm(terms: BookingGuarantee[]): Promise<BookingReservation[]> {
+    // `guaranteeMethods` makes CiHMS record the stay as paid (Complete/Credit). `guaranteeInfos` with the method ID as the
+    // policy and no guaranteeValue leaves it unpaid (No, settledAmount 0). Verified on the test tenant 2026-09-17.
     return parseBookingReservations(await this.client.request("/common-trd/v1/crs/booking/batch-commit", { retry: false, body: {
-      items: terms.map((item) => ({ reservationId: item.reservationId, guaranteeMethods: [...new Set(item.methods.map(({ id }) => id))].map((id) => ({ id })) })),
+      items: terms.map((item) => ({ reservationId: item.reservationId,
+        guaranteeInfos: [...new Map(item.methods.map((method) => [method.id, method.policyRefId])).entries()]
+          .map(([id, policyRefId]) => ({ guaranteePolicyId: id, guaranteeRefID: policyRefId })) })),
       isSendMail: false, organization: this.config.organizationCode,
     } }), true);
   }

@@ -10,6 +10,8 @@ export type CloudHmsConfig = {
   organizationCode: string;
   distributionChannelId: string;
   requestorId: string;
+  travelAgentName: string;
+  travelAgentProfileId: string;
   timeoutMs: number;
   concurrency: number;
 };
@@ -46,6 +48,9 @@ const environmentSchema = z.object({
   CLOUDHMS_ORGANIZATION_CODE: z.string().default("Vingroup"),
   CLOUDHMS_DISTRIBUTION_CHANNEL_ID: z.string().default(""),
   CLOUDHMS_REQUESTOR_ID: z.string().default(""),
+  // Profile TravelAgent gắn vào mỗi reservation. Chưa có profileRefID thì CiHMS chỉ lưu tên, không liên kết profile.
+  CLOUDHMS_TRAVEL_AGENT_NAME: z.string().min(1).default("NT_Travel"),
+  CLOUDHMS_TRAVEL_AGENT_PROFILE_ID: z.string().default(""),
   CLOUDHMS_TIMEOUT_MS: z.coerce.number().int().positive().default(12000),
   CLOUDHMS_CONCURRENCY: z.coerce.number().int().min(1).max(20).default(4),
 });
@@ -88,6 +93,8 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Server
       organizationCode: value.CLOUDHMS_ORGANIZATION_CODE,
       distributionChannelId: value.CLOUDHMS_DISTRIBUTION_CHANNEL_ID,
       requestorId: value.CLOUDHMS_REQUESTOR_ID,
+      travelAgentName: value.CLOUDHMS_TRAVEL_AGENT_NAME,
+      travelAgentProfileId: value.CLOUDHMS_TRAVEL_AGENT_PROFILE_ID,
       timeoutMs: value.CLOUDHMS_TIMEOUT_MS,
       concurrency: value.CLOUDHMS_CONCURRENCY,
     },

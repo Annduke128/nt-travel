@@ -11,7 +11,7 @@ không phải fixture sai.
 Các fixture `booking-create.json`, `booking-guarantees.json`, `booking-confirm.json` và
 `booking-inventory.json` được trích ngày 2026-09-08 từ response đầu tiên của `(1) Create booking`,
 `(2.1) Get guarantee methods`, `(3.1) Batch Commit Booking`, `Get hotel availability` trong cùng collection.
-Chỉ giữ các trường cần cho hợp đồng, bỏ thông tin khách. Inventory giữ cặp phòng/rate
+Chỉ giữ các trường cần cho hợp đồng, bỏ thông tin khách; guarantee giữ `detail.id` vì commit gửi nó làm `guaranteeRefID`. Inventory giữ cặp phòng/rate
 `5051e26c…` / `1604924a…` và các allotment thật. Guarantee giữ đủ 5 ngày có cùng method ID:
 đây là các khoản theo ngày, không phải 5 phương thức độc lập. Commit gửi mỗi ID một lần.
 

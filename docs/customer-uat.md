@@ -32,7 +32,7 @@ The internal tool authenticates staff, displays availability and rates, creates 
 | SECURITY-01 | Inspect authenticated API responses | `Cache-Control: private, no-store`; secure HttpOnly cookies; hardened headers |
 | BOOK-01 | Select a rate and complete guest details for each room | Exact dates/rate/room count; policies visible before creation |
 | BOOK-02 | Create booking, then inspect before confirming | Prospect displayed as pending; no automatic commit or email |
-| BOOK-03 | Review guarantees and explicitly confirm | Every reservation becomes Reserved; confirmation numbers retained |
+| BOOK-03 | Review guarantees and explicitly confirm | Every reservation becomes Reserved; confirmation numbers retained; CiHMS shows payment `No`, settled 0 and a TravelAgent NT_Travel profile |
 | BOOK-04 | Change price, inventory, or guarantee between steps | Mutation is blocked until current conditions are reviewed |
 | BOOK-05 | Double submit, lose response, restart BFF, reopen own requests | One upstream create/commit per request; uncertain states require reconciliation |
 | BOOK-06 | Fail only one reservation in batch commit | No whole-booking success; individual outcomes retained |

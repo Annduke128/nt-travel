@@ -22,7 +22,8 @@ function setup() {
   vi.spyOn(bedbank, "detail").mockResolvedValue({ propertyId: input.propertyId, roomTypeId: input.roomTypeId, ratePlanId: input.ratePlanId,
     roomTypeName: "Standard King", ratePlanName: "PHMS-T18", quantity: 0, total: 1800000, average: 900000, currency: "VND", maxOccupancy: 4,
     dailyRates: [{ date: "2026-06-01", amount: 900000 }, { date: "2026-06-02", amount: 900000 }], policies: [] });
-  const gateway = new CloudHmsBookingGateway({ request } as unknown as CloudHmsClient, bedbank, { organizationCode: "org", distributionChannelId: "channel", requestorId: "requestor", sourceCode: "CRO" });
+  const gateway = new CloudHmsBookingGateway({ request } as unknown as CloudHmsClient, bedbank, { organizationCode: "org", distributionChannelId: "channel", requestorId: "requestor", sourceCode: "CRO",
+    travelAgentName: "NT_Travel", travelAgentProfileId: "ta-profile" });
   return { request, gateway };
 }
 describe("CiHMS booking contract", () => {
@@ -35,6 +36,12 @@ describe("CiHMS booking contract", () => {
         referenceIds: [{ type: "Opera_TA_Rec_Loc", value: "NT-reference" }],
         roomRates: [{ stayDate: "2026-06-01", allotmentId: "103688ee-b772-45a6-ab51-2129610d9e57", roomTypeCode: "BKSDG" },
           { stayDate: "2026-06-02", ratePlanCode: "PHMS-T18" }] }] });
+  });
+  test("links each reservation to the configured travel agent profile", async () => {
+    const { gateway } = setup();
+    const prepared = await gateway.prepare(input, actor, "ref");
+    expect((prepared.body as { reservations: { profiles: unknown[] }[] }).reservations[0]!.profiles)
+      .toContainEqual({ firstName: "NT_Travel", profileRefID: "ta-profile", profileType: "TravelAgent" });
   });
   test("refuses an unrelated room rate instead of taking the first returned rate", async () => {
     const { gateway } = setup();
@@ -50,6 +57,22 @@ describe("CiHMS booking contract", () => {
     expect(parseBookingReservations(created, false)[0]).toMatchObject({ id: "52ccb695-fbd8-4ed4-bcf0-8a05a6412f58", status: "Prospect", confirmationNumber: "VOPQ24407" });
     expect(parseBookingReservations(confirmed, true)[0]).toMatchObject({ status: "Reserved", confirmationNumber: "VOPQ24410" });
     expect(parseBookingGuarantee(guarantees)).toMatchObject({ amount: 20000015, currency: "VND", methods: expect.arrayContaining([expect.objectContaining({ amount: 4000003 })]) });
+  });
+  test("rejects a guarantee method without its policy reference", () => {
+    const payload = structuredClone(guarantees);
+    delete (payload.data.guaranteeMethods[0]!.detail as { id?: string }).id;
+    expect(() => parseBookingGuarantee(payload)).toThrow();
+  });
+  test("commits each guarantee once without recording a payment", async () => {
+    const { gateway, request } = setup();
+    request.mockResolvedValue(confirmed as never);
+    await gateway.confirm([parseBookingGuarantee(guarantees)]);
+    // guaranteeMethods made CiHMS record Complete/Credit; guaranteeInfos without a value stays unpaid (verified 2026-09-17).
+    expect(request).toHaveBeenLastCalledWith("/common-trd/v1/crs/booking/batch-commit", { retry: false, body: {
+      isSendMail: false, organization: "org",
+      items: [{ reservationId: "d84e2a16-c2c8-481a-87df-83aa63c69086",
+        guaranteeInfos: [{ guaranteePolicyId: "b5002a8e-4c4f-4591-8b42-baa123fe156f", guaranteeRefID: "00000001-0000-0000-0000-000000000000" }] }],
+    } });
   });
   test("rejects a business failure even with HTTP success", () => {
     expect(() => parseBookingReservations({ ...created, isSuccess: false, errors: [{ message: "private upstream data" }] }, false)).toThrow();

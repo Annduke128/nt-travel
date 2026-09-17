@@ -12,7 +12,7 @@ const input: BookingCreateRequest = {
   expectedTotal: 1800000, currency: "VND", guests: [{ firstName: "An", lastName: "Nguyen", email: "guest@example.com", phoneNumber: "0912345678" }], notes: "", acceptedPolicies: true,
 };
 const reservation = { id: "res1", confirmationNumber: "VP123", status: "Prospect" };
-const guarantee: BookingGuarantee = { reservationId: "res1", amount: 500000, currency: "VND", methods: [{ id: "g1", type: "Deposit", amount: 500000, currency: "VND" }] };
+const guarantee: BookingGuarantee = { reservationId: "res1", amount: 500000, currency: "VND", methods: [{ id: "g1", policyRefId: "p1", type: "Deposit", amount: 500000, currency: "VND" }] };
 function setup(store = new MemoryBookingStore()) {
   const gateway: BookingGateway = {
     mode: "mock",

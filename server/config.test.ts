@@ -26,6 +26,12 @@ describe("production runtime config", () => {
     expect(config.readinessCacheMs).toBe(5_000);
   });
 
+  test("names the CiHMS travel agent profile NT_Travel unless configured", () => {
+    expect(loadConfig({}).cloudHms).toMatchObject({ travelAgentName: "NT_Travel", travelAgentProfileId: "" });
+    expect(loadConfig({ CLOUDHMS_TRAVEL_AGENT_NAME: "NT Travel", CLOUDHMS_TRAVEL_AGENT_PROFILE_ID: "ta-1" }).cloudHms)
+      .toMatchObject({ travelAgentName: "NT Travel", travelAgentProfileId: "ta-1" });
+  });
+
   test("rejects unsafe proxy hop counts", () => {
     expect(() => loadConfig({ TRUST_PROXY_HOPS: "20" })).toThrow();
   });

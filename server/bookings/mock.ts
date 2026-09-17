@@ -23,7 +23,7 @@ export class MockBookingGateway implements BookingGateway {
   }
   async guarantees(ids: string[]): Promise<BookingGuarantee[]> {
     return ids.map((reservationId) => ({ reservationId, amount: 0, currency: "VND",
-      methods: [{ id: `demo-${reservationId}`, type: "Deposit", amount: 0, currency: "VND" }] }));
+      methods: [{ id: `demo-${reservationId}`, policyRefId: "demo-policy", type: "Deposit", amount: 0, currency: "VND" }] }));
   }
   async confirm(terms: BookingGuarantee[]) {
     return terms.map((item) => {

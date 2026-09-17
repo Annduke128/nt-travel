@@ -13,6 +13,8 @@ const config: CloudHmsConfig = {
   organizationCode: "Vingroup",
   distributionChannelId: "channel-id",
   requestorId: "requestor-id",
+  travelAgentName: "NT_Travel",
+  travelAgentProfileId: "",
   timeoutMs: 1000,
   concurrency: 2,
 };

@@ -19,6 +19,8 @@ Trình duyệt gọi BFF `/api`; token CiHMS và service key Supabase chỉ có 
 | `CLOUDHMS_DISTRIBUTION_CHANNEL_ID` | Channel được phép bán phòng |
 | `CLOUDHMS_REQUESTOR_ID` | Requestor ID dùng khi tạo reservation |
 | `CLOUDHMS_BOOKING_SOURCE_CODE` | Mã nguồn booking; mặc định `CRO` theo bảng mô tả collection. Xác nhận giá trị tenant; body mẫu dùng `WBS`. |
+| `CLOUDHMS_TRAVEL_AGENT_NAME` | Tên profile TravelAgent gắn vào reservation; mặc định `NT_Travel` |
+| `CLOUDHMS_TRAVEL_AGENT_PROFILE_ID` | profileRefID của NT_Travel do CiHMS cấp. Để trống thì CiHMS chỉ lưu tên, không liên kết profile |
 
 Không dùng identifier mẫu trong collection làm cấu hình live. Allotment, room type và rate plan
 được lấy từ availability đúng property/channel; không hardcode hoặc nhận allotment từ trình duyệt.
@@ -78,13 +80,16 @@ Detail được lấy cho một phòng, tổng booking là giá một phòng × 
 2. Lưu request ID và fingerprint vào `public.bookings` trước lệnh ghi. Live dùng Supabase với quyền BFF;
    cùng request ID chỉ được tạo một lần, kể cả khi các worker nhận request đồng thời.
 3. `POST /common-trd/v1/crs/booking`: `distributionChannel` (khác tên trường ở availability),
-   `requestorId`, `sourceCode`, `reservations[]` với Guest/Booker, totalAmount, roomOccupancy,
+   `requestorId`, `sourceCode`, `reservations[]` với Booker/TravelAgent/Guest, totalAmount, roomOccupancy,
    referenceIds và roomRates từng ngày lấy từ dữ liệu server.
 4. Đọc `data.reservations[].reservationID`, `confirmationNumber`, `status`. `Prospect` là chờ xác nhận.
 5. `POST /common-trd/v1/crs/booking/{id}/guarantee-methods`: hiển thị toàn bộ khoản theo ngày,
    tổng bảo đảm và hạn. Collection lặp cùng ID qua nhiều ngày; batch commit gửi các ID duy nhất.
 6. `POST /api/bookings/{id}/confirm` sau khi nhân viên đồng ý. BFF tải lại điều kiện, so hash với
    phiên bản nhân viên đã đọc và khóa trạng thái trước `POST /common-trd/v1/crs/booking/batch-commit`.
+   Body dùng `guaranteeInfos`: mỗi method ID duy nhất là `guaranteePolicyId`, `detail.id` là `guaranteeRefID`, không gửi
+   `guaranteeValue`. CiHMS ghi `paymentStatus=No`, `settledAmount=0`. Không dùng `guaranteeMethods`: CiHMS ghi
+   `Complete`/`Credit` như đã thu tiền (kiểm chứng trên tenant test 2026-09-17).
 7. Chỉ báo confirmed khi tất cả `data.items[].reservation` đúng ID, không có errorMessages và đều `Reserved`.
    `isSendMail=false`; xác nhận booking không được diễn giải là đã thu tiền.
 

@@ -27,6 +27,7 @@ export type BookingDto = {
 };
 export type BookingGuarantee = {
   reservationId: string; amount: number; currency: string; dueDate?: string;
-  methods: { id: string; type: string; amount: number; currency: string; stayDate?: string }[];
+  // policyRefId là detail.id của guarantee method; batch commit gửi nó làm guaranteeRefID.
+  methods: { id: string; policyRefId: string; type: string; amount: number; currency: string; stayDate?: string }[];
 };
 export type BookingGuaranteesDto = { version: string; guarantees: BookingGuarantee[] };
