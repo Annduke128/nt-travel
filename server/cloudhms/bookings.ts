@@ -112,6 +112,7 @@ export class CloudHmsBookingGateway implements BookingGateway {
         isProfilesSpecified: true, profiles: [
           { firstName: actor.displayName, lastName: "", email: actor.email, profileRefID: "", profileType: "Booker" },
           { firstName: this.config.travelAgentName, profileRefID: this.config.travelAgentProfileId, profileType: "TravelAgent" },
+          { profileRefID: "BookingPortal", profileType: "BookingClient" },
           { ...guest, profileRefID: "", profileType: "Guest", primarySearchValues: { email: guest.email, phoneNumber: guest.phoneNumber } },
         ],
         isRoomRatesSpecified: true, roomRates, isPackagesSpecified: false, packages: [],

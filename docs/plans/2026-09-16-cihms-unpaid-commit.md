@@ -1,6 +1,7 @@
 > Trạng thái: **đã triển khai mục 1, 2, 4, 5** (2026-09-17). Payload commit chưa thanh toán đã kiểm chứng trên CiHMS test.
-> Còn chờ: profileRefID của NT_Travel từ CiHMS, Requestor ID chính thức, thêm `CLOUDHMS_TRAVEL_AGENT_*` vào `.env.example`.
-> Mục 3 (script đọc ngược) chưa làm. E2E qua `CloudHmsBookingGateway` đã sửa: 5751237588 → Reserved, payment No, settled 0, TravelAgent NT_Travel.
+> Đã nhận profileRefID NT_TRAVEL `5ad529d3-6b9e-4f3c-8aab-0eed61331aac` (2026-09-18), dùng làm mặc định cùng profile BookingClient `BookingPortal`.
+> Còn chờ: Requestor ID chính thức, thêm `CLOUDHMS_TRAVEL_AGENT_*` vào `.env.example`.
+> Mục 3 (script đọc ngược) chưa làm. E2E qua `CloudHmsBookingGateway` đã sửa: 5751237588 → Reserved, payment No, settled 0, TravelAgent NT_TRAVEL và BookingClient BookingPortal.
 
 # Sửa commit booking CiHMS: không ghi nhận thanh toán + gắn profile NT_Travel
 

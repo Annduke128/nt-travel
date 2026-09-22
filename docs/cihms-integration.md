@@ -19,8 +19,8 @@ Trình duyệt gọi BFF `/api`; token CiHMS và service key Supabase chỉ có 
 | `CLOUDHMS_DISTRIBUTION_CHANNEL_ID` | Channel được phép bán phòng |
 | `CLOUDHMS_REQUESTOR_ID` | Requestor ID dùng khi tạo reservation |
 | `CLOUDHMS_BOOKING_SOURCE_CODE` | Mã nguồn booking; mặc định `CRO` theo bảng mô tả collection. Xác nhận giá trị tenant; body mẫu dùng `WBS`. |
-| `CLOUDHMS_TRAVEL_AGENT_NAME` | Tên profile TravelAgent gắn vào reservation; mặc định `NT_Travel` |
-| `CLOUDHMS_TRAVEL_AGENT_PROFILE_ID` | profileRefID của NT_Travel do CiHMS cấp. Để trống thì CiHMS chỉ lưu tên, không liên kết profile |
+| `CLOUDHMS_TRAVEL_AGENT_NAME` | Tên profile TravelAgent gắn vào reservation; mặc định `NT_TRAVEL` |
+| `CLOUDHMS_TRAVEL_AGENT_PROFILE_ID` | profileRefID của NT_TRAVEL do CiHMS cấp; mặc định `5ad529d3-6b9e-4f3c-8aab-0eed61331aac`. Để trống thì CiHMS chỉ lưu tên, không liên kết profile |
 
 Không dùng identifier mẫu trong collection làm cấu hình live. Allotment, room type và rate plan
 được lấy từ availability đúng property/channel; không hardcode hoặc nhận allotment từ trình duyệt.
@@ -80,7 +80,7 @@ Detail được lấy cho một phòng, tổng booking là giá một phòng × 
 2. Lưu request ID và fingerprint vào `public.bookings` trước lệnh ghi. Live dùng Supabase với quyền BFF;
    cùng request ID chỉ được tạo một lần, kể cả khi các worker nhận request đồng thời.
 3. `POST /common-trd/v1/crs/booking`: `distributionChannel` (khác tên trường ở availability),
-   `requestorId`, `sourceCode`, `reservations[]` với Booker/TravelAgent/Guest, totalAmount, roomOccupancy,
+   `requestorId`, `sourceCode`, `reservations[]` với Booker/TravelAgent/BookingClient (`BookingPortal`)/Guest, totalAmount, roomOccupancy,
    referenceIds và roomRates từng ngày lấy từ dữ liệu server.
 4. Đọc `data.reservations[].reservationID`, `confirmationNumber`, `status`. `Prospect` là chờ xác nhận.
 5. `POST /common-trd/v1/crs/booking/{id}/guarantee-methods`: hiển thị toàn bộ khoản theo ngày,

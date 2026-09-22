@@ -37,11 +37,12 @@ describe("CiHMS booking contract", () => {
         roomRates: [{ stayDate: "2026-06-01", allotmentId: "103688ee-b772-45a6-ab51-2129610d9e57", roomTypeCode: "BKSDG" },
           { stayDate: "2026-06-02", ratePlanCode: "PHMS-T18" }] }] });
   });
-  test("links each reservation to the configured travel agent profile", async () => {
+  test("links each reservation to the configured travel agent and the booking portal client", async () => {
     const { gateway } = setup();
     const prepared = await gateway.prepare(input, actor, "ref");
-    expect((prepared.body as { reservations: { profiles: unknown[] }[] }).reservations[0]!.profiles)
-      .toContainEqual({ firstName: "NT_Travel", profileRefID: "ta-profile", profileType: "TravelAgent" });
+    const profiles = (prepared.body as { reservations: { profiles: unknown[] }[] }).reservations[0]!.profiles;
+    expect(profiles).toContainEqual({ firstName: "NT_Travel", profileRefID: "ta-profile", profileType: "TravelAgent" });
+    expect(profiles).toContainEqual({ profileRefID: "BookingPortal", profileType: "BookingClient" });
   });
   test("refuses an unrelated room rate instead of taking the first returned rate", async () => {
     const { gateway } = setup();

@@ -35,8 +35,8 @@ Store secrets in the deployment platform secret store, never in an image or Git:
 | `CLOUDHMS_DISTRIBUTION_CHANNEL_ID` | yes | Approved channel |
 | `CLOUDHMS_REQUESTOR_ID` | yes | Approved requestor |
 | `CLOUDHMS_BOOKING_SOURCE_CODE` | tenant-dependent | Defaults to `CRO` from the collection description; verify with CiHMS (`WBS` appears in the sample body) |
-| `CLOUDHMS_TRAVEL_AGENT_NAME` | no | TravelAgent profile name on every reservation; defaults to `NT_Travel` |
-| `CLOUDHMS_TRAVEL_AGENT_PROFILE_ID` | once issued | CiHMS profileRefID of NT_Travel. Empty stores the name without linking a profile |
+| `CLOUDHMS_TRAVEL_AGENT_NAME` | no | TravelAgent profile name on every reservation; defaults to `NT_TRAVEL` |
+| `CLOUDHMS_TRAVEL_AGENT_PROFILE_ID` | no | CiHMS profileRefID of NT_TRAVEL; defaults to `5ad529d3-6b9e-4f3c-8aab-0eed61331aac`. Empty stores the name without linking a profile |
 
 The reverse proxy must overwrite, not append untrusted, `X-Forwarded-For`, `X-Forwarded-Host`, and `X-Forwarded-Proto`.
 
@@ -75,7 +75,7 @@ obtain `Reserved`. Confirm sends `isSendMail=false`. No payment is collected by 
 Commit therefore sends `guaranteeInfos` (method ID as `guaranteePolicyId`, `detail.id` as `guaranteeRefID`, no
 `guaranteeValue`), which CiHMS records as `paymentStatus=No`, `settledAmount=0`. The former `guaranteeMethods` body was
 recorded as `paymentStatus=Complete`, `guaranteeType=Credit`; reservations committed before this change need correcting in CiHMS.
-Each reservation carries a `TravelAgent` profile from `CLOUDHMS_TRAVEL_AGENT_*`.
+Each reservation carries a `TravelAgent` profile from `CLOUDHMS_TRAVEL_AGENT_*` and a `BookingClient` profile `BookingPortal`.
 To verify, read the reservation back with `POST /common-trd/v1/crs/reservation/search-free-text` using its confirmation number.
 See [integration flow](cihms-integration.md) and [booking UAT](customer-uat.md).
 
@@ -213,7 +213,8 @@ They hold for that tenant on staging; re-confirm against the production tenant b
     400 `Guarantee Policy ID … is invalid`; adding `guaranteeValue: 0` returns a generic 400. Ask CiHMS to confirm this
     mapping, since the collection describes `guaranteePolicyId` as a policy ID.
 12. **[verified 2026-09-17]** A `TravelAgent` profile with an empty `profileRefID` is stored by name only (no link, `taCode`
-    dropped). There is no profile lookup API in the collection; CiHMS must issue the NT_Travel profileRefID.
+    dropped). There is no profile lookup API in the collection; CiHMS issued the NT_TRAVEL profileRefID
+    `5ad529d3-6b9e-4f3c-8aab-0eed61331aac`, now the default.
 13. **[verified 2026-09-17]** CiHMS truncates `Opera_TA_Rec_Loc` to 35 characters, so `NT-{requestId}` (39) is stored
     without its last four characters. Reconcile by prefix or by reservation ID until the reference is shortened.
 

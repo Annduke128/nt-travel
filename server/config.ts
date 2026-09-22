@@ -48,9 +48,10 @@ const environmentSchema = z.object({
   CLOUDHMS_ORGANIZATION_CODE: z.string().default("Vingroup"),
   CLOUDHMS_DISTRIBUTION_CHANNEL_ID: z.string().default(""),
   CLOUDHMS_REQUESTOR_ID: z.string().default(""),
-  // Profile TravelAgent gắn vào mỗi reservation. Chưa có profileRefID thì CiHMS chỉ lưu tên, không liên kết profile.
-  CLOUDHMS_TRAVEL_AGENT_NAME: z.string().min(1).default("NT_Travel"),
-  CLOUDHMS_TRAVEL_AGENT_PROFILE_ID: z.string().default(""),
+  // Profile TravelAgent gắn vào mỗi reservation, mặc định là profile NT_TRAVEL do CiHMS cấp.
+  // profileRefID rỗng thì CiHMS chỉ lưu tên, không liên kết profile.
+  CLOUDHMS_TRAVEL_AGENT_NAME: z.string().min(1).default("NT_TRAVEL"),
+  CLOUDHMS_TRAVEL_AGENT_PROFILE_ID: z.string().default("5ad529d3-6b9e-4f3c-8aab-0eed61331aac"),
   CLOUDHMS_TIMEOUT_MS: z.coerce.number().int().positive().default(12000),
   CLOUDHMS_CONCURRENCY: z.coerce.number().int().min(1).max(20).default(4),
 });
