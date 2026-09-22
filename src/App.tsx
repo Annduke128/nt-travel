@@ -1,11 +1,21 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { BedDouble, CalendarDays, Check, Hotel, LogOut, Search, ShieldCheck, UserCog, UsersRound, X } from "lucide-react";
-import type { BookingDto, HotelAvailabilityDto, Profile, PropertyDto, RateDetailDto, RoomAvailabilityDto, SearchRequest } from "../shared/contracts";
+import type { BookingDto, HotelAvailabilityDto, NoAvailabilityDetails, Profile, PropertyDto, RateDetailDto, RoomAvailabilityDto, SearchRequest } from "../shared/contracts";
 import { ApiError, bedbankApi } from "./api";
 import { BookingCheckout, BookingDetails, BookingsList, type BookingSelection } from "./Booking";
 
 type View = "search" | "users" | "bookings" | "checkout" | "booking";
 type SearchState = SearchRequest & { roomCount: number; adults: number; children: number; infants: number };
+// Hai lý do "không có kết quả" mà BFF phân biệt bằng mã lỗi: sai tên thì sửa tên, khớp tên mà
+// hết phòng thì đổi ngày. Lỗi hạ tầng (503/429) vẫn đi đường alert đỏ như trước.
+type SearchOutcome =
+  | { code: "PROPERTY_NOT_FOUND"; message: string }
+  | { code: "NO_AVAILABILITY"; message: string; properties: PropertyDto[] };
+
+const matchedProperties = (details: unknown): PropertyDto[] => {
+  const properties = (details as NoAvailabilityDetails | undefined)?.properties;
+  return Array.isArray(properties) ? properties : [];
+};
 function createInitialSearch(): SearchState {
   const arrival = new Date(); arrival.setDate(arrival.getDate() + 1);
   const departure = new Date(); departure.setDate(departure.getDate() + 3);
@@ -54,24 +64,85 @@ function RateDetail({ detail, close, onBook }: { detail: RateDetailDto; close: (
   return <aside className="booking-summary detail-panel" aria-labelledby="detail-title"><div className="summary-head"><div><p>Giá và chính sách đặt phòng</p><h2 id="detail-title">Chi tiết giá net</h2></div><button type="button" onClick={close} aria-label="Đóng chi tiết"><X size={19} /></button></div><dl><div><dt>Hạng phòng</dt><dd>{detail.roomTypeName}</dd></div><div><dt>Rate plan</dt><dd>{detail.ratePlanName}</dd></div><div><dt>Còn lại</dt><dd>{detail.quantity} phòng</dd></div><div><dt>Thuế</dt><dd>{moneyOrDash(detail.tax, detail.currency)}</dd></div><div className="summary-total"><dt>Tổng giá net</dt><dd>{money(detail.total, detail.currency)}</dd></div></dl>{detail.tax === undefined ? <p className="summary-note">CloudHMS không trả dữ liệu thuế cho hạng phòng này.</p> : null}<h3>Giá từng ngày</h3><ul className="daily-rates">{detail.dailyRates.map((rate) => <li key={rate.date}><span>{dateLabel(rate.date)}</span><strong>{money(rate.amount, detail.currency)}</strong></li>)}</ul><h3>Chính sách</h3><ul className="policy-list">{detail.policies.map((policy) => <li key={`${policy.type}-${policy.description}`}><strong>{policy.type}</strong><span>{policy.description}</span></li>)}</ul><button type="button" className="continue-button" onClick={onBook}>Tiếp tục đặt phòng</button><p className="summary-note"><ShieldCheck size={15} /> Giá được kiểm tra lại khi tạo đặt phòng.</p></aside>;
 }
 
+// Combobox tự dựng thay cho `<datalist>`: trình duyệt tự lọc option của datalist theo chuỗi
+// đang gõ, nên gợi ý mờ ("vinpearl" → "Vinpear Discovery") bị ẩn dù API đã trả về. Listbox này
+// hiển thị đúng những gì API trả, kèm bàn phím và ARIA theo pattern combobox.
+const SUGGESTION_LIST_ID = "property-suggestions";
+const suggestionOptionId = (index: number) => `${SUGGESTION_LIST_ID}-option-${index}`;
+
+function DestinationField({ value, suggestions, failed, onChange, onSelect }: {
+  value: string;
+  suggestions: PropertyDto[];
+  failed: boolean;
+  onChange: (value: string) => void;
+  onSelect: (property: PropertyDto) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(-1);
+  const expanded = open && suggestions.length > 0;
+  const close = () => { setOpen(false); setActive(-1); };
+  const commit = (property: PropertyDto) => { onSelect(property); close(); };
+  const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      if (suggestions.length === 0) return;
+      setOpen(true);
+      setActive((current) => (current + (event.key === "ArrowDown" ? 1 : -1) + suggestions.length) % suggestions.length);
+      return;
+    }
+    // Enter khi đang chọn gợi ý phải nhận gợi ý, không submit luôn cả form tìm kiếm.
+    if (event.key === "Enter" && expanded && active >= 0) { event.preventDefault(); commit(suggestions[active]!); return; }
+    if (event.key === "Escape" && expanded) { event.preventDefault(); close(); }
+  };
+  return <div className="field field-destination">
+    <label htmlFor="destination">Điểm đến hoặc khách sạn</label>
+    <div className="field-control"><Hotel size={18} />
+      <input id="destination" role="combobox" aria-expanded={expanded} aria-controls={SUGGESTION_LIST_ID} aria-autocomplete="list"
+        {...(expanded && active >= 0 ? { "aria-activedescendant": suggestionOptionId(active) } : {})}
+        autoComplete="off" required value={value} placeholder="Nha Trang, Phú Quốc…"
+        onChange={(event) => { onChange(event.target.value); setOpen(true); setActive(-1); }}
+        onFocus={() => setOpen(true)} onBlur={close} onKeyDown={onKeyDown} />
+    </div>
+    <ul className="suggestion-list" id={SUGGESTION_LIST_ID} role="listbox" aria-label="Khách sạn gợi ý" hidden={!expanded}>
+      {suggestions.map((property, index) => <li key={property.id} id={suggestionOptionId(index)} role="option" aria-selected={index === active} data-active={index === active}
+        // mousedown thay vì click: blur của input chạy trước click và sẽ đóng danh sách.
+        onMouseDown={(event) => { event.preventDefault(); commit(property); }}>
+        <strong>{property.name}</strong>{property.city ? <span>{property.city}</span> : null}
+      </li>)}
+    </ul>
+    {failed ? <p className="field-hint" role="status">Chưa tải được gợi ý. Bạn vẫn có thể bấm “Tìm khách sạn”.</p> : null}
+  </div>;
+}
+
 function SearchView({ onBook }: { onBook: (selection: BookingSelection) => void }) {
-  const [form, setForm] = useState(createInitialSearch); const [suggestions, setSuggestions] = useState<PropertyDto[]>([]); const [hotels, setHotels] = useState<HotelAvailabilityDto[] | null>(null); const [rooms, setRooms] = useState<RoomAvailabilityDto[]>([]); const [selectedHotel, setSelectedHotel] = useState<string>(); const [detail, setDetail] = useState<RateDetailDto>(); const [busy, setBusy] = useState<"hotels" | "rooms" | "detail">(); const [error, setError] = useState("");
+  const [form, setForm] = useState(createInitialSearch); const [suggestions, setSuggestions] = useState<PropertyDto[]>([]); const [suggestFailed, setSuggestFailed] = useState(false); const [hotels, setHotels] = useState<HotelAvailabilityDto[] | null>(null); const [rooms, setRooms] = useState<RoomAvailabilityDto[]>([]); const [selectedHotel, setSelectedHotel] = useState<string>(); const [detail, setDetail] = useState<RateDetailDto>(); const [busy, setBusy] = useState<"hotels" | "rooms" | "detail">(); const [error, setError] = useState(""); const [outcome, setOutcome] = useState<SearchOutcome>();
   const generation = useRef(0);
+  const arrivalRef = useRef<HTMLInputElement>(null);
   const submittedSearch = useRef<SearchRequest | undefined>(undefined);
   useEffect(() => () => { generation.current += 1; }, []);
   const request = (): SearchRequest => ({ destination: form.destination.trim(), arrivalDate: form.arrivalDate, departureDate: form.departureDate, rooms: Array.from({ length: form.roomCount }, () => ({ adults: form.adults, children: form.children, infants: form.infants })) });
   useEffect(() => {
     if (form.destination.trim().length < 2) { setSuggestions([]); return; }
     let active = true;
-    const timer = window.setTimeout(() => { bedbankApi.properties(form.destination).then((value) => { if (active) setSuggestions(value); }).catch(() => { if (active) setSuggestions([]); }); }, 200);
+    // Lỗi gợi ý trước đây bị nuốt: 401/503 hiện ra y như "không có khách sạn nào".
+    const timer = window.setTimeout(() => {
+      bedbankApi.properties(form.destination)
+        .then((value) => { if (active) { setSuggestions(value); setSuggestFailed(false); } })
+        .catch(() => { if (active) { setSuggestions([]); setSuggestFailed(true); } });
+    }, 200);
     return () => { active = false; window.clearTimeout(timer); };
   }, [form.destination]);
   const searchHotels = async () => {
     const version = ++generation.current;
     const search = request();
-    setBusy("hotels"); setError(""); setHotels(null); setRooms([]); setDetail(undefined); setSelectedHotel(undefined);
+    setBusy("hotels"); setError(""); setOutcome(undefined); setHotels(null); setRooms([]); setDetail(undefined); setSelectedHotel(undefined);
     try { const result = await bedbankApi.hotels(search); if (version === generation.current) { submittedSearch.current = search; setHotels(result); } }
-    catch (reason) { if (version === generation.current) setError(reason instanceof Error ? reason.message : "Không thể tìm khách sạn"); }
+    catch (reason) {
+      if (version !== generation.current) return;
+      if (reason instanceof ApiError && reason.code === "PROPERTY_NOT_FOUND") setOutcome({ code: reason.code, message: reason.message });
+      else if (reason instanceof ApiError && reason.code === "NO_AVAILABILITY") setOutcome({ code: reason.code, message: reason.message, properties: matchedProperties(reason.details) });
+      else setError(reason instanceof Error ? reason.message : "Không thể tìm khách sạn");
+    }
     finally { if (version === generation.current) setBusy(undefined); }
   };
   const searchRooms = async (propertyId: string) => {
@@ -101,12 +172,12 @@ function SearchView({ onBook }: { onBook: (selection: BookingSelection) => void 
   };
   const update = (key: keyof SearchState, value: string | number) => {
     generation.current += 1; submittedSearch.current = undefined;
-    setBusy(undefined); setHotels(null); setRooms([]); setDetail(undefined); setSelectedHotel(undefined); setError("");
+    setBusy(undefined); setHotels(null); setRooms([]); setDetail(undefined); setSelectedHotel(undefined); setError(""); setOutcome(undefined);
     setForm((current) => ({ ...current, [key]: value }));
   };
   return <><section className="search-shell reveal" aria-labelledby="search-title"><div className="search-intro"><div><p className="staff-context"><span /> Dành cho nhân viên NT Travel</p><h1 id="search-title">Tìm kỳ nghỉ xứng tầm.</h1></div><p className="search-lede">Tồn phòng, giá net và chính sách lấy từ CloudHMS trên cùng một màn hình.</p></div><form className="search-form" onSubmit={(event) => { event.preventDefault(); void searchHotels(); }}>
-    <div className="field field-destination"><label htmlFor="destination">Điểm đến hoặc khách sạn</label><div className="field-control"><Hotel size={18} /><input id="destination" list="property-suggestions" required value={form.destination} onChange={(event) => update("destination", event.target.value)} placeholder="Nha Trang, Phú Quốc…" /><datalist id="property-suggestions">{suggestions.map((property) => <option key={property.id} value={property.name}>{property.city}</option>)}</datalist></div></div>
-    <div className="field"><label htmlFor="arrival">Nhận phòng</label><div className="field-control"><CalendarDays size={18} /><input id="arrival" aria-label="Ngày nhận phòng" type="date" required value={form.arrivalDate} onChange={(event) => update("arrivalDate", event.target.value)} /></div></div>
+    <DestinationField value={form.destination} suggestions={suggestions} failed={suggestFailed} onChange={(value) => update("destination", value)} onSelect={(property) => update("destination", property.name)} />
+    <div className="field"><label htmlFor="arrival">Nhận phòng</label><div className="field-control"><CalendarDays size={18} /><input id="arrival" ref={arrivalRef} aria-label="Ngày nhận phòng" type="date" required value={form.arrivalDate} onChange={(event) => update("arrivalDate", event.target.value)} /></div></div>
     <div className="field"><label htmlFor="departure">Trả phòng</label><div className="field-control"><CalendarDays size={18} /><input id="departure" aria-label="Ngày trả phòng" type="date" required min={form.arrivalDate} value={form.departureDate} onChange={(event) => update("departureDate", event.target.value)} /></div></div>
     <div className="field"><label htmlFor="adults">Người lớn / phòng</label><div className="field-control"><UsersRound size={18} /><input id="adults" aria-label="Người lớn mỗi phòng" type="number" min={1} max={8} value={form.adults} onChange={(event) => update("adults", Number(event.target.value))} /></div></div>
     <div className="field"><label htmlFor="children">Trẻ em / phòng</label><div className="field-control"><UsersRound size={18} /><input id="children" aria-label="Trẻ em mỗi phòng" type="number" min={0} max={6} value={form.children} onChange={(event) => update("children", Number(event.target.value))} /></div></div>
@@ -114,7 +185,7 @@ function SearchView({ onBook }: { onBook: (selection: BookingSelection) => void 
     <div className="field"><label htmlFor="rooms">Số phòng</label><div className="field-control"><BedDouble size={18} /><input id="rooms" aria-label="Số phòng" type="number" min={1} max={8} value={form.roomCount} onChange={(event) => update("roomCount", Number(event.target.value))} /></div></div>
     <button className="search-button" type="submit" disabled={Boolean(busy)}><Search size={19} />{busy === "hotels" ? "Đang tìm…" : "Tìm khách sạn"}</button>
   </form><div className="search-meta"><span><ShieldCheck size={16} /> Giá net, không markup</span><span><Check size={16} /> Availability gọi trực tiếp</span></div></section><main className="content-grid" id="main-content">
-    <section className="results" aria-live="polite">{error ? <ErrorMessage error={error} retry={() => void searchHotels()} /> : null}{busy && busy !== "hotels" ? <div className="loading-state">Đang tải dữ liệu CloudHMS…</div> : null}{hotels === null && !busy ? <div className="empty-state"><div className="empty-art"><Hotel size={34} /></div><h2>Bắt đầu từ một điểm đến.</h2><p>Tìm theo thành phố hoặc tên khách sạn để xem phòng, rate plan và giá net.</p></div> : null}{hotels?.length === 0 ? <div className="empty-state"><h2>Không còn phòng phù hợp.</h2><p>Thử đổi ngày lưu trú, số khách hoặc điểm đến.</p></div> : null}{hotels && hotels.length > 0 ? <><div className="results-heading"><div><h2>{hotels.length} khách sạn còn phòng</h2><p>{form.destination} · {form.arrivalDate} → {form.departureDate}</p></div></div><div className="hotel-list">{hotels.map((hotel) => <article className="hotel-card" key={hotel.id}>{hotel.imageUrl ? <figure className="hotel-image"><img src={hotel.imageUrl} alt={`Không gian tại ${hotel.name}`} /></figure> : null}<div className="hotel-main"><div className="hotel-heading"><div><p>{hotel.city}</p><h3>{hotel.name}</h3></div><span className="availability-badge">Còn {hotel.quantity}</span></div><div className="hotel-rate"><span>Từ</span><strong>{money(hotel.fromPrice, hotel.currency)}</strong></div><button className="select-room" type="button" disabled={Boolean(busy)} onClick={() => void searchRooms(hotel.id)} aria-label={`Xem phòng tại ${hotel.name}`}>Xem hạng phòng</button>{selectedHotel === hotel.id && !busy && rooms.length === 0 ? <p className="inline-empty" role="status">Khách sạn này chưa có hạng phòng khả dụng cho tiêu chí đã chọn.</p> : null}{selectedHotel === hotel.id && rooms.length > 0 ? <div className="room-options">{rooms.map((room) => <article className="room-option" key={`${room.roomTypeId}-${room.ratePlanId}`}><div><h4>{room.roomTypeName}</h4><p>{room.ratePlanName} · Còn {room.quantity} phòng{room.maxOccupancy ? ` · Tối đa ${room.maxOccupancy} khách` : ""}</p></div><div className="rate-block"><small>Net toàn kỳ</small><strong>{money(room.total, room.currency)}</strong><span>{room.tax === undefined ? "Thuế: chưa có dữ liệu" : `Thuế ${money(room.tax, room.currency)}`}</span></div><div className="room-actions"><button type="button" disabled={Boolean(busy)} onClick={() => void loadDetail(room)} aria-label={`Xem giá chi tiết ${room.roomTypeName}`}>Xem giá & chính sách</button><button type="button" className="select-room" disabled={Boolean(busy) || room.quantity < form.roomCount} onClick={() => void loadDetail(room, true)} aria-label={`Đặt phòng ${room.roomTypeName}`}>Đặt phòng</button></div></article>)}</div> : null}</div></article>)}</div></> : null}</section>{detail ? <RateDetail detail={detail} close={() => setDetail(undefined)} onBook={() => startBooking(detail)} /> : null}
+    <section className="results" aria-live="polite">{error ? <ErrorMessage error={error} retry={() => void searchHotels()} /> : null}{busy && busy !== "hotels" ? <div className="loading-state">Đang tải dữ liệu CloudHMS…</div> : null}{hotels === null && !busy && !outcome && !error ? <div className="empty-state"><div className="empty-art"><Hotel size={34} /></div><h2>Bắt đầu từ một điểm đến.</h2><p>Tìm theo thành phố hoặc tên khách sạn để xem phòng, rate plan và giá net.</p></div> : null}{outcome?.code === "PROPERTY_NOT_FOUND" ? <div className="empty-state"><div className="empty-art"><Hotel size={34} /></div><h2>Không tìm thấy khách sạn nào.</h2><p>{outcome.message}</p><p>Thử tên ngắn hơn hoặc bỏ bớt từ, ví dụ “vinpearl hue” thay cho tên đầy đủ.</p></div> : null}{outcome?.code === "NO_AVAILABILITY" ? <div className="empty-state"><h2>Không còn phòng cho ngày đã chọn.</h2><p>{outcome.message}</p>{outcome.properties.length > 0 ? <ul className="matched-properties" aria-label="Khách sạn khớp tên">{outcome.properties.map((property) => <li key={property.id}><strong>{property.name}</strong>{property.city ? <span>{property.city}</span> : null}</li>)}</ul> : null}<button type="button" className="select-room" onClick={() => arrivalRef.current?.focus()}>Đổi ngày</button></div> : null}{hotels?.length === 0 ? <div className="empty-state"><h2>Không còn phòng phù hợp.</h2><p>Thử đổi ngày lưu trú, số khách hoặc điểm đến.</p></div> : null}{hotels && hotels.length > 0 ? <><div className="results-heading"><div><h2>{hotels.length} khách sạn còn phòng</h2><p>{form.destination} · {form.arrivalDate} → {form.departureDate}</p></div></div><div className="hotel-list">{hotels.map((hotel) => <article className="hotel-card" key={hotel.id}>{hotel.imageUrl ? <figure className="hotel-image"><img src={hotel.imageUrl} alt={`Không gian tại ${hotel.name}`} /></figure> : null}<div className="hotel-main"><div className="hotel-heading"><div><p>{hotel.city}</p><h3>{hotel.name}</h3></div><span className="availability-badge">Còn {hotel.quantity}</span></div><div className="hotel-rate"><span>Từ</span><strong>{money(hotel.fromPrice, hotel.currency)}</strong></div><button className="select-room" type="button" disabled={Boolean(busy)} onClick={() => void searchRooms(hotel.id)} aria-label={`Xem phòng tại ${hotel.name}`}>Xem hạng phòng</button>{selectedHotel === hotel.id && !busy && rooms.length === 0 ? <p className="inline-empty" role="status">Khách sạn này chưa có hạng phòng khả dụng cho tiêu chí đã chọn.</p> : null}{selectedHotel === hotel.id && rooms.length > 0 ? <div className="room-options">{rooms.map((room) => <article className="room-option" key={`${room.roomTypeId}-${room.ratePlanId}`}><div><h4>{room.roomTypeName}</h4><p>{room.ratePlanName} · Còn {room.quantity} phòng{room.maxOccupancy ? ` · Tối đa ${room.maxOccupancy} khách` : ""}</p></div><div className="rate-block"><small>Net toàn kỳ</small><strong>{money(room.total, room.currency)}</strong><span>{room.tax === undefined ? "Thuế: chưa có dữ liệu" : `Thuế ${money(room.tax, room.currency)}`}</span></div><div className="room-actions"><button type="button" disabled={Boolean(busy)} onClick={() => void loadDetail(room)} aria-label={`Xem giá chi tiết ${room.roomTypeName}`}>Xem giá & chính sách</button><button type="button" className="select-room" disabled={Boolean(busy) || room.quantity < form.roomCount} onClick={() => void loadDetail(room, true)} aria-label={`Đặt phòng ${room.roomTypeName}`}>Đặt phòng</button></div></article>)}</div> : null}</div></article>)}</div></> : null}</section>{detail ? <RateDetail detail={detail} close={() => setDetail(undefined)} onBook={() => startBooking(detail)} /> : null}
   </main></>;
 }
 

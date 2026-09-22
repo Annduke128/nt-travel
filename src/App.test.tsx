@@ -26,6 +26,105 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("NT Travel bedbank v1", () => {
+  /** Thay riêng một endpoint, các endpoint còn lại giữ mock mặc định. */
+  function stubEndpoint(path: string, body: unknown, status: number) {
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation((url, init) => String(url) === path ? json(body, status) : original(url, init));
+  }
+
+  async function searchFor(destination: string) {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.type(await screen.findByLabelText("Điểm đến hoặc khách sạn"), destination);
+    await user.click(screen.getByRole("button", { name: "Tìm khách sạn" }));
+    return user;
+  }
+
+  test("tên không khớp khách sạn nào thì báo sửa tên, không phải lỗi hệ thống", async () => {
+    stubEndpoint("/api/availability/hotels", { error: { code: "PROPERTY_NOT_FOUND", message: "Không có khách sạn nào khớp với “vinperl hue”" } }, 404);
+
+    await searchFor("vinperl hue");
+
+    expect(await screen.findByRole("heading", { name: "Không tìm thấy khách sạn nào." })).toBeVisible();
+    expect(screen.getByText(/vinperl hue/)).toBeVisible();
+    // Sai tên không phải sự cố hệ thống: không hiện alert đỏ kèm "Thử lại".
+    expect(screen.queryByRole("button", { name: "Thử lại" })).toBeNull();
+  });
+
+  test("ngày đã chọn hết phòng thì vẫn liệt kê khách sạn khớp tên để đổi ngày", async () => {
+    stubEndpoint("/api/availability/hotels", { error: {
+      code: "NO_AVAILABILITY",
+      message: "2 khách sạn khớp “vinpearl hai phong” nhưng không còn phòng từ 15/10/2026 đến 17/10/2026",
+      details: { properties: [
+        { id: "hp1", name: "Vinpearl Hotel Imperia Hải Phòng", city: "Hải Phòng" },
+        { id: "hp2", name: "Vinpearl Hotel Rivera Hải Phòng", city: "Hải Phòng" },
+      ] },
+    } }, 404);
+
+    const user = await searchFor("vinpearl hai phong");
+
+    expect(await screen.findByRole("heading", { name: "Không còn phòng cho ngày đã chọn." })).toBeVisible();
+    expect(screen.getByText("Vinpearl Hotel Imperia Hải Phòng")).toBeVisible();
+    expect(screen.getByText("Vinpearl Hotel Rivera Hải Phòng")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Đổi ngày" }));
+
+    expect(screen.getByLabelText("Ngày nhận phòng")).toHaveFocus();
+  });
+
+  test("lỗi upstream thật vẫn hiện alert đỏ kèm thử lại", async () => {
+    stubEndpoint("/api/availability/hotels", { error: { code: "UPSTREAM_UNAVAILABLE", message: "CloudHMS tạm thời không khả dụng" } }, 503);
+
+    await searchFor("nha trang");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("CloudHMS tạm thời không khả dụng");
+    expect(screen.getByRole("button", { name: "Thử lại" })).toBeVisible();
+  });
+
+  test("nhân viên chọn khách sạn từ danh sách gợi ý bằng bàn phím", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    const field = await screen.findByLabelText("Điểm đến hoặc khách sạn");
+
+    await user.type(field, "vinpearl");
+
+    // Gợi ý phải hiện đúng những gì API trả về, kể cả khi tên không chứa chuỗi đang gõ.
+    expect(await screen.findByRole("option", { name: /vinpearl beachfront nha trang/i })).toBeVisible();
+    expect(field).toHaveAttribute("aria-expanded", "true");
+    await user.keyboard("{ArrowDown}");
+    expect(field).toHaveAttribute("aria-activedescendant", "property-suggestions-option-0");
+    await user.keyboard("{Enter}");
+    expect(field).toHaveValue("Vinpearl Beachfront Nha Trang");
+    await waitFor(() => expect(screen.queryByRole("option")).toBeNull());
+  });
+
+  test("đóng danh sách gợi ý bằng Escape", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    const field = await screen.findByLabelText("Điểm đến hoặc khách sạn");
+    await user.type(field, "vinpearl");
+    expect(await screen.findByRole("option", { name: /vinpearl beachfront nha trang/i })).toBeVisible();
+
+    await user.keyboard("{Escape}");
+
+    expect(screen.queryByRole("option")).toBeNull();
+    expect(field).toHaveAttribute("aria-expanded", "false");
+  });
+
+  test("báo lỗi khi không tải được gợi ý thay vì hiện danh sách trống", async () => {
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation((url, init) =>
+      String(url).startsWith("/api/properties")
+        ? json({ error: { code: "UPSTREAM_UNAVAILABLE", message: "Dữ liệu từ CloudHMS không dùng được" } }, 503)
+        : original(url, init));
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.type(await screen.findByLabelText("Điểm đến hoặc khách sạn"), "vinpearl");
+
+    expect(await screen.findByText(/chưa tải được gợi ý/i)).toBeVisible();
+  });
+
   test("staff books a room and must review the guarantee before confirming", async () => {
     const original = vi.mocked(fetch).getMockImplementation()!;
     let booking: Record<string, unknown>;

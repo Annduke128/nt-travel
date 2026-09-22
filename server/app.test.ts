@@ -191,6 +191,46 @@ describe("BFF", () => {
     expect(JSON.stringify(response.body)).not.toContain("access");
   });
 
+  test("mock mode matches the way live does, so a mock deployment tests real behaviour", async () => {
+    const deps = services();
+    const app = createApp({ auth: deps.auth, bedbank: new MockBedbankService() });
+    const suggest = (query: string) => request(app).get(`/api/properties?query=${encodeURIComponent(query)}`).set("Cookie", "nt_access=access");
+
+    // Không dấu, và lối viết "&" trong khi mock lưu "và" — hai quirk của catalog CiHMS thật.
+    const noDiacritics = await suggest("phu quoc");
+    const ampersand = await suggest("resort & spa da nang");
+    // "Vinpear" thiếu chữ "l" đúng như CiHMS lưu; nhân viên gõ đủ chữ.
+    const typo = await suggest("vinpearl discovery");
+
+    expect(noDiacritics.body.data.map((property: { name: string }) => property.name)).toContain("Vinpearl Resort & Spa Phú Quốc");
+    expect(ampersand.body.data.map((property: { name: string }) => property.name)).toContain("Vinpearl Resort và Spa Đà Nẵng");
+    expect(typo.body.data.map((property: { name: string }) => property.name)).toContain("Vinpear Discovery 1 Phú Quốc");
+  });
+
+  test("mock mode can reach the no-availability state", async () => {
+    const deps = services();
+    const app = createApp({ auth: deps.auth, bedbank: new MockBedbankService() });
+    const body = { destination: "discovery", arrivalDate: "2026-08-10", departureDate: "2026-08-12", rooms: [{ adults: 2, children: 0, infants: 0 }] };
+
+    const response = await request(app).post("/api/availability/hotels").set("Cookie", "nt_access=access").send(body);
+
+    expect(response.status).toBe(404);
+    expect(response.body.error.code).toBe("NO_AVAILABILITY");
+    expect(response.body.error.details.properties).toEqual([expect.objectContaining({ name: "Vinpear Discovery 1 Phú Quốc" })]);
+  });
+
+  test("a destination matching no hotel is reported with its own error code", async () => {
+    const deps = services();
+    const app = createApp({ auth: deps.auth, bedbank: new MockBedbankService() });
+    const body = { destination: "Khách sạn không tồn tại", arrivalDate: "2026-08-10", departureDate: "2026-08-12", rooms: [{ adults: 2, children: 0, infants: 0 }] };
+
+    const response = await request(app).post("/api/availability/hotels").set("Cookie", "nt_access=access").send(body);
+
+    expect(response.status).toBe(404);
+    expect(response.body.error.code).toBe("PROPERTY_NOT_FOUND");
+    expect(response.body.error.requestId).toBe(response.headers["x-request-id"]);
+  });
+
   test("a malformed request body is a client error and stays traceable", async () => {
     const app = createApp(services());
 

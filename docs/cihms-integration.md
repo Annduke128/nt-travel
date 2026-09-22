@@ -64,6 +64,19 @@ Các request đọc được refresh token một lần khi gặp 401. Request gh
 - `GET /common-trd/v1/pms-property/hotels/info?page=…&limit=…`: đọc đủ trang theo page size thực tế, lọc property active.
 - `GET /common-trd/v1/pms-property/room-type?hotelId=…&isPseudo=false`: tên và thông tin hạng phòng.
 
+Catalog được cache 15 phút và đánh chỉ mục tìm kiếm mờ (Fuse.js, extended search) dùng chung cho
+`GET /api/properties` (gợi ý) và `POST /api/availability/hotels` (kết quả), nên hai màn hình không
+bao giờ lệch tập khớp. Quy tắc so khớp, đặt ra theo đúng dữ liệu thật của CiHMS:
+
+- Bỏ dấu hai phía, và quy `&` về `va` — CiHMS viết liên từ không nhất quán (`Resort và Spa Đà Nẵng`
+  nhưng `Resort & Spa Phú Quốc Oasis`).
+- Khoảng trắng là AND giữa các token, nên gõ thiếu từ giữa tên vẫn khớp
+  (`vinpearl hai phong` → `Vinpearl Hotel Imperia Hải Phòng`).
+- Token từ 4 ký tự được sai một ký tự, chịu được lỗi chính tả của chính catalog
+  (`vinpearl` → `Vinpear Discovery 1 Phú Quốc`). Token ngắn hơn phải khớp nguyên văn, nếu không
+  `hue` trúng cả `phu` và mọi khách sạn Phú Quốc lọt vào kết quả tìm khách sạn Huế.
+- Kết quả xếp theo điểm khớp; gợi ý cắt còn 20 dòng đầu.
+
 ## Step 3 — Check Availability
 
 - `POST /common-trd/v1/crs/booking/get-hotel-availability`
@@ -116,7 +129,8 @@ Các mã dưới đây là hợp đồng **BFF NT Travel**, không phải bảng
 | --- | --- |
 | `VALIDATION_ERROR` | Sửa ngày, khách hoặc dữ liệu bắt buộc; không gọi create |
 | `AUTH_REQUIRED`, `FORBIDDEN`, `PASSWORD_CHANGE_REQUIRED` | Kiểm tra phiên đăng nhập/quyền/mật khẩu tạm |
-| `NO_AVAILABILITY` | Tìm lại phòng; không lấy rate đầu tiên thay cho rate đã chọn |
+| `PROPERTY_NOT_FOUND` | Không có khách sạn nào khớp tên đã gõ — sửa **tên**, không sửa ngày; chưa gọi availability nên không có gì để retry |
+| `NO_AVAILABILITY` | Khớp tên nhưng hết phòng cho khoảng ngày đã chọn — sửa **ngày**; `details.properties` (tối đa 20) là các khách sạn đã khớp tên. Ở bước rate: tìm lại phòng, không lấy rate đầu tiên thay cho rate đã chọn |
 | `PRICE_CHANGED` | Dừng tạo, xem lại giá mới |
 | `GUARANTEE_CHANGED` | Tải lại điều kiện và đồng ý lại |
 | `BOOKING_CONFLICT` | Mở lại đơn theo ID; không gửi lại với dữ liệu khác |

@@ -1,7 +1,7 @@
 import type { BookingCreateRequest, BookingDto, BookingGuaranteesDto, HotelAvailabilityDto, Profile, PropertyDto, RateDetailDto, RoomAvailabilityDto, SearchRequest } from "../shared/contracts";
 
 export class ApiError extends Error {
-  constructor(public readonly code: string, message: string, public readonly status: number) { super(message); }
+  constructor(public readonly code: string, message: string, public readonly status: number, public readonly details?: unknown) { super(message); }
 }
 
 async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -11,8 +11,8 @@ async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     headers: { ...(init.body ? { "content-type": "application/json" } : {}), ...init.headers },
   });
   if (!response.ok) {
-    const payload = await response.json().catch(() => ({})) as { error?: { code?: string; message?: string } };
-    throw new ApiError(payload.error?.code ?? "UPSTREAM_UNAVAILABLE", payload.error?.message ?? "Yêu cầu không thành công", response.status);
+    const payload = await response.json().catch(() => ({})) as { error?: { code?: string; message?: string; details?: unknown } };
+    throw new ApiError(payload.error?.code ?? "UPSTREAM_UNAVAILABLE", payload.error?.message ?? "Yêu cầu không thành công", response.status, payload.error?.details);
   }
   if (response.status === 204) return undefined as T;
   const payload = await response.json() as { data: T };

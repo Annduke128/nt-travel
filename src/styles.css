@@ -68,6 +68,23 @@ kbd { border: var(--rule-thin) solid var(--color-rule); border-radius: var(--rad
 .field-control input::placeholder { color: var(--color-muted); opacity: 1; }
 .field-control select { appearance: none; background-image: none; }
 .room-field { color: var(--color-paper); }
+/* Listbox gợi ý khách sạn: mobile-first đứng ngay dưới ô nhập, từ tablet trở lên nổi lên trên
+   nội dung để không đẩy layout form tìm kiếm. */
+.field-destination { position: relative; }
+.suggestion-list { list-style: none; margin: 0; padding: 0; display: grid; max-height: 17rem; overflow-y: auto; border: var(--rule-thin) solid var(--color-rule); border-radius: var(--radius-sm); background: var(--color-surface); }
+.suggestion-list[hidden] { display: none; }
+.suggestion-list li { min-height: 2.75rem; display: grid; gap: var(--space-3xs); align-content: center; padding: var(--space-xs) var(--space-sm); cursor: pointer; }
+.suggestion-list li + li { border-block-start: var(--rule-thin) solid var(--color-rule-2); }
+.suggestion-list strong { font-weight: 600; font-size: var(--text-sm); color: var(--color-ink); }
+.suggestion-list span { font-size: var(--text-xs); color: var(--color-muted); }
+.suggestion-list li[data-active="true"], .suggestion-list li:hover { background: var(--color-accent-soft); }
+.field-hint { margin: 0; font-size: var(--text-xs); color: var(--color-error); }
+/* Khách sạn khớp tên nhưng hết phòng cho khoảng ngày đã chọn. */
+.matched-properties { list-style: none; margin: 0 0 var(--space-lg); padding: 0; display: grid; gap: var(--space-2xs); width: 100%; max-width: 34rem; }
+.matched-properties li { display: flex; flex-wrap: wrap; gap: var(--space-2xs) var(--space-sm); align-items: baseline; padding: var(--space-xs) 0; border-block-start: var(--rule-thin) solid var(--color-rule-2); }
+.matched-properties strong { font-weight: 600; font-size: var(--text-sm); color: var(--color-ink); }
+.matched-properties span { font-size: var(--text-xs); color: var(--color-muted); }
+
 .stepper { min-height: 3.25rem; display: grid; grid-template-columns: 2.75rem 1fr 2.75rem; align-items: center; border: var(--rule-thin) solid var(--color-rule); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-ink); overflow: clip; }
 .stepper button { min-height: 3.25rem; border: 0; background: transparent; color: inherit; display: grid; place-items: center; }
 .stepper output { text-align: center; font-variant-numeric: tabular-nums; font-weight: 700; }
@@ -179,6 +196,7 @@ kbd { border: var(--rule-thin) solid var(--color-rule); border-radius: var(--rad
   .search-lede { justify-self: end; align-self: end; }
   .search-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .field-destination { grid-column: 1 / -1; }
+  .suggestion-list { position: absolute; inset-inline: 0; inset-block-start: calc(100% + var(--space-2xs)); z-index: var(--z-dropdown); box-shadow: 0 12px 28px -18px var(--color-shadow); }
   .search-button { align-self: end; }
   .hotel-card { grid-template-columns: minmax(0, 0.7fr) minmax(0, 1.3fr); }
   .room-row { grid-template-columns: minmax(11rem, 1fr) minmax(10rem, 1.2fr); }

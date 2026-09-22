@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, expect, test, vi } from "vitest";
 import { CloudHmsBedbankService } from "./bedbank.js";
+import { AppError } from "../errors.js";
 import type { CloudHmsClient } from "./client.js";
 import hotelAvailability from "./fixtures/hotel-availability.json" with { type: "json" };
 import hotelsInfo from "./fixtures/hotels-info.json" with { type: "json" };
@@ -97,6 +98,83 @@ describe("CloudHMS property catalog", () => {
   });
 });
 
+// Tên thật trên tenant CiHMS: "Vinpear Discovery" bị gõ thiếu chữ "l", còn "Oasis" nằm ở
+// cuối tên. Nhân viên gõ đúng thương hiệu nên matcher phải chịu được cả hai.
+const LIVE_NAMES: [id: string, name: string, city: string][] = [
+  ["imperia", "Vinpearl Hotel Imperia Hải Phòng", "Hải Phòng"],
+  ["rivera", "Vinpearl Hotel Rivera Hải Phòng", "Hải Phòng"],
+  ["discovery", "Vinpear Discovery 1 Phú Quốc", ""],
+  ["oasis", "Vinpearl Resort & Spa Phú Quốc Oasis", "Phú Quốc"],
+  ["hue", "Vinpearl Hotel Huế", "Huế"],
+  ["danang", "Vinpearl Resort và Spa Đà Nẵng", "Ngu Hanh Son"],
+  ["wonderworld", "Vinpearl Wonderworld Phú Quốc", ""],
+  ["mocmien", "MocMien Hotel", "Ha Giang"],
+  ["qa", "QA Hotel MU", ""],
+];
+
+/** Catalog một trang dựng từ danh sách tên, giữ nguyên envelope thật. */
+function namedService(entries = LIVE_NAMES, availability: unknown = { data: { rates: [] } }) {
+  const items = entries.map(([id, name, city]) => ({ ...clone(hotelsInfo.data.items[0]!), id, name, city, thumbnails: [] }));
+  const request = vi.fn(async (path: string, _options?: unknown) => {
+    if (path.includes("hotels/info")) return { data: { total: items.length, limit: 30, page: 0, items } };
+    if (path.includes("get-hotel-availability")) return availability;
+    throw new Error(`Unexpected path ${path}`);
+  });
+  return { request, service: service(request) };
+}
+
+describe("CloudHMS fuzzy property search", () => {
+  const ids = async (query: string) => (await namedService().service.properties(query)).map((property) => property.id);
+
+  test("tolerates a typo in the upstream catalog name", async () => {
+    expect(await ids("vinpearl")).toContain("discovery");
+  });
+
+  test("matches when the query skips words in the middle of the name", async () => {
+    expect(await ids("vinpearl hai phong")).toEqual(expect.arrayContaining(["imperia", "rivera"]));
+  });
+
+  test("keeps matching a token at the end of the name", async () => {
+    expect(await ids("oasis")).toEqual(["oasis"]);
+  });
+
+  test("does not return unrelated properties", async () => {
+    const result = await ids("vinpearl");
+
+    expect(result).not.toContain("mocmien");
+    expect(result).not.toContain("qa");
+  });
+
+  test("requires short tokens to match literally", async () => {
+    // "hue" chỉ 3 ký tự: nếu cho sai một ký tự thì nó khớp cả "phu" và mọi khách sạn
+    // Phú Quốc tràn vào kết quả tìm khách sạn Huế.
+    expect(await ids("vinpearl hue")).toStrictEqual(["hue"]);
+  });
+
+  test("treats & and và as the same word", async () => {
+    // CiHMS viết liên từ không nhất quán: "Resort và Spa Đà Nẵng" nhưng "Resort & Spa Phú Quốc
+    // Oasis". Nhân viên chỉ gõ một lối và phải ra kết quả ở cả hai.
+    expect(await ids("resort & spa da nang")).toStrictEqual(["danang"]);
+    expect(await ids("resort va spa phu quoc")).toStrictEqual(["oasis"]);
+  });
+
+  test("ranks the closest name first", async () => {
+    expect(await ids("imperia hai phong")).toStrictEqual(["imperia"]);
+  });
+
+  test("hotels() matches the same properties the suggestions offer", async () => {
+    const { request, service: bedbank } = namedService();
+
+    // Fixture không có rate nào nên hotels() báo NO_AVAILABILITY; ở đây chỉ kiểm property
+    // nào được gửi lên upstream.
+    await bedbank.hotels({ ...search, destination: "vinpearl hai phong" }).catch(() => undefined);
+
+    const call = request.mock.calls.find(([path]) => path.includes("get-hotel-availability"));
+    const { propertyIds } = (call![1] as { body: { propertyIds: string[] } }).body;
+    expect(propertyIds).toEqual(expect.arrayContaining(["imperia", "rivera"]));
+  });
+});
+
 describe("CloudHMS hotel availability", () => {
   test("ignores rate plans without a price when picking the lead rate", async () => {
     const { service: bedbank } = routed();
@@ -107,12 +185,34 @@ describe("CloudHMS hotel availability", () => {
     expect(hotel).toEqual({ id: VINOASIS, name: "VinOasis Phú Quốc", city: "Phú Quốc", quantity: 146, fromPrice: 1_000_000, currency: "VND" });
   });
 
-  test("drops a property whose rates are all unpriced", async () => {
+  test("reports the matched properties when every rate is unpriced", async () => {
     const payload = clone(hotelAvailability);
     payload.data.rates[0]!.rates = [payload.data.rates[0]!.rates[0]!];
     const { service: bedbank } = routed({ hotels: payload });
 
-    expect(await bedbank.hotels(search)).toEqual([]);
+    // Rate duy nhất còn lại là rate 0 đồng: khách sạn khớp tên nhưng ngày này không bán được.
+    // Nhân viên cần biết đó là vấn đề của NGÀY, kèm danh sách khách sạn đã khớp để đổi ngày.
+    const rejection = bedbank.hotels(search);
+
+    await expect(rejection).rejects.toBeInstanceOf(AppError);
+    await expect(rejection).rejects.toMatchObject({
+      status: 404,
+      code: "NO_AVAILABILITY",
+      details: { properties: [{ id: VINOASIS, name: "VinOasis Phú Quốc", city: "Phú Quốc" }] },
+      message: expect.stringContaining("từ 01/06/2026 đến 03/06/2026"),
+    });
+  });
+
+  test("separates a name that matches nothing from a date with no rooms", async () => {
+    const { request, service: bedbank } = namedService();
+
+    await expect(bedbank.hotels({ ...search, destination: "khach san khong ton tai" })).rejects.toMatchObject({
+      status: 404,
+      code: "PROPERTY_NOT_FOUND",
+      message: expect.stringContaining("khach san khong ton tai"),
+    });
+    // Tên đã không khớp thì không tốn thêm một vòng gọi availability.
+    expect(request.mock.calls.some(([path]) => path.includes("get-hotel-availability"))).toBe(false);
   });
 
   test("sends per-room occupancy alongside the room count", async () => {

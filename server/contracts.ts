@@ -1,5 +1,5 @@
 import { z } from "zod";
-export type { HotelAvailabilityDto, PropertyDto, RateDetailDto, RoomAvailabilityDto, SearchRequest } from "../shared/contracts.js";
+export type { HotelAvailabilityDto, NoAvailabilityDetails, PropertyDto, RateDetailDto, RoomAvailabilityDto, SearchRequest } from "../shared/contracts.js";
 
 const isoDate = /^\d{4}-\d{2}-\d{2}$/;
 const calendarDate = (message: string) => z.string().regex(isoDate, message).refine((value) => {

@@ -11,6 +11,12 @@ The internal tool authenticates staff, displays availability and rates, creates 
 - `/health/live` and `/health/ready` return 200.
 - One Admin and one Staff account are available.
 - CloudHMS source data is available for comparison.
+- On a `CLOUDHMS_MODE=mock` deployment, SEARCH-03 to SEARCH-06 are still reproducible: the mock
+  catalog carries the same two catalog defects as live — `Vinpear Discovery 1 Phú Quốc` (missing
+  `l`) and `Vinpearl Resort và Spa Đà Nẵng` (`và` instead of `&`) — and `Vinpear Discovery 1
+  Phú Quốc` is sold out so `NO_AVAILABILITY` is reachable. Query `vinpearl discovery` for
+  SEARCH-05, `khach san la` for SEARCH-04. Mock cannot cover rate/tax reconciliation
+  (RATE-01, RATE-02) or the 20-suggestion cap; those need `CLOUDHMS_MODE=live`.
 
 ## Acceptance scenarios
 
@@ -22,7 +28,11 @@ The internal tool authenticates staff, displays availability and rates, creates 
 | AUTH-04 | Lock a Staff account | Existing/new session cannot access search after re-authentication |
 | ADMIN-01 | Create Staff, change role/status, reset password | UI reflects each change; audit rows are present |
 | ADMIN-02 | Attempt to demote/disable the final active Admin | Operation is rejected |
-| SEARCH-01 | Search by city and exact property name | Active matching properties only |
+| SEARCH-01 | Search by city and by property name (exact) | Active matching properties only |
+| SEARCH-03 | Search a property name with a missing word, a typo, and `&` where the catalog writes `và` | Each returns the intended hotel; suggestion list and search results agree |
+| SEARCH-04 | Search a name that matches no hotel | `PROPERTY_NOT_FOUND` state asking to fix the name; no red retry alert |
+| SEARCH-05 | Search a matching name on dates with no rooms | `NO_AVAILABILITY` state listing the matched hotels; "Đổi ngày" moves focus to the arrival date |
+| SEARCH-06 | Pick a suggestion using only the keyboard (↓, Enter, Escape) | Listbox is reachable, active option is announced, Enter fills the field without submitting |
 | SEARCH-02 | Search one, two and multiple rooms with adult/child/infant occupancy | Request and returned availability match approved CloudHMS behavior |
 | RATE-01 | Open hotel, room/rate and detail for at least three properties | Room/rate identifiers and remaining quantity match CloudHMS |
 | RATE-02 | Compare at least three stays/currencies | Total, average, tax and daily breakdown reconcile exactly |

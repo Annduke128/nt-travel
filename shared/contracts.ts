@@ -5,6 +5,9 @@ export type RoomOccupancy = { adults: number; children: number; infants: number 
 export type SearchRequest = { destination: string; arrivalDate: string; departureDate: string; rooms: RoomOccupancy[] };
 export type PropertyDto = { id: string; name: string; city: string; imageUrl?: string };
 export type HotelAvailabilityDto = PropertyDto & { quantity: number; fromPrice: number; currency: string };
+// `details` của lỗi NO_AVAILABILITY: khách sạn đã khớp tên nhưng không còn phòng cho ngày đã
+// chọn. Nhân viên cần thấy danh sách này để đổi ngày mà không phải gõ lại tên.
+export type NoAvailabilityDetails = { properties: PropertyDto[] };
 // `tax` là optional: CloudHMS không trả thuế ở mọi endpoint availability, và bỏ trống
 // khác hẳn về nghĩa so với thuế bằng 0.
 export type RoomAvailabilityDto = {

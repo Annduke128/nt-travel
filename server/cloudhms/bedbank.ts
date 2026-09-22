@@ -2,6 +2,7 @@ import type { HotelAvailabilityDto, PropertyDto, RateDetailDto, RoomAvailability
 import { AppError } from "../errors.js";
 import type { BedbankService } from "../services.js";
 import type { CloudHmsClient } from "./client.js";
+import { createPropertyMatcher, noAvailability, propertyNotFound, type PropertyMatcher } from "./search.js";
 
 type RecordValue = Record<string, unknown>;
 const object = (value: unknown): RecordValue => value && typeof value === "object" ? value as RecordValue : {};
@@ -25,11 +26,6 @@ function identifier(...candidates: unknown[]): string {
 // dùng `roomTypeName` / `roomTypeCode`. Hai shape không thay thế được cho nhau.
 const roomTypeLabel = (roomType: RecordValue): string =>
   string(roomType.name, string(roomType.roomTypeName, string(roomType.code, string(roomType.roomTypeCode, "Hạng phòng"))));
-
-// Nhân viên gõ "Tây Ninh" nhưng catalog lưu "Hotel Tay Ninh 11" (và ngược lại với "Phú Quốc"),
-// nên so khớp điểm đến phải bỏ dấu ở cả hai phía.
-const normalize = (value: string): string =>
-  value.toLocaleLowerCase("vi").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d");
 
 const CATALOG_PAGE_LIMIT = 200;
 const CATALOG_MAX_PAGES = 50;
@@ -110,7 +106,7 @@ function occupancyBody(search: SearchRequest) {
 }
 
 export class CloudHmsBedbankService implements BedbankService {
-  private catalog?: { expiresAt: number; properties: PropertyDto[] };
+  private catalog?: { expiresAt: number; properties: PropertyDto[]; match: PropertyMatcher };
 
   constructor(
     private readonly client: CloudHmsClient,
@@ -119,8 +115,8 @@ export class CloudHmsBedbankService implements BedbankService {
     private readonly concurrency = 4,
   ) {}
 
-  private async activeProperties(): Promise<PropertyDto[]> {
-    if (this.catalog && this.catalog.expiresAt > Date.now()) return this.catalog.properties;
+  private async activeCatalog(): Promise<{ properties: PropertyDto[]; match: PropertyMatcher }> {
+    if (this.catalog && this.catalog.expiresAt > Date.now()) return this.catalog;
     const items: unknown[] = [];
     for (let page = 0; page < CATALOG_MAX_PAGES; page += 1) {
       const payload = await this.client.request<unknown>(`/common-trd/v1/pms-property/hotels/info?page=${page}&limit=${CATALOG_PAGE_LIMIT}`, { method: "GET" });
@@ -146,8 +142,13 @@ export class CloudHmsBedbankService implements BedbankService {
       const imageUrl = string(firstThumbnail.url);
       return [{ id, name, city: string(item.city), ...(imageUrl ? { imageUrl } : {}) }];
     });
-    this.catalog = { expiresAt: Date.now() + 15 * 60_000, properties };
-    return properties;
+    this.catalog = { expiresAt: Date.now() + 15 * 60_000, properties, match: createPropertyMatcher(properties) };
+    return this.catalog;
+  }
+
+  /** Điểm khớp do Fuse xếp hạng: tên sát query nhất đứng trước. */
+  private async match(query: string): Promise<PropertyDto[]> {
+    return (await this.activeCatalog()).match(query);
   }
 
   private async roomTypeMetadata(propertyId: string): Promise<Map<string, RecordValue>> {
@@ -157,21 +158,18 @@ export class CloudHmsBedbankService implements BedbankService {
   }
 
   async health() {
-    const properties = await this.activeProperties();
+    const { properties } = await this.activeCatalog();
     if (properties.length === 0) throw new AppError(503, "UPSTREAM_UNAVAILABLE", "CloudHMS không có property active");
   }
 
   async properties(query: string): Promise<PropertyDto[]> {
-    const properties = await this.activeProperties();
-    const normalized = normalize(query.trim());
-    if (!normalized) return properties.slice(0, 20);
-    return properties.filter((property) => normalize(`${property.name} ${property.city}`).includes(normalized)).slice(0, 20);
+    return (await this.match(query)).slice(0, 20);
   }
 
   async hotels(search: SearchRequest): Promise<HotelAvailabilityDto[]> {
-    const normalized = normalize(search.destination.trim());
-    const matches = (await this.activeProperties()).filter((property) => normalize(`${property.name} ${property.city}`).includes(normalized));
-    if (matches.length === 0) return [];
+    const destination = search.destination.trim();
+    const matches = await this.match(destination);
+    if (matches.length === 0) throw propertyNotFound(destination);
     const batches: PropertyDto[][] = [];
     for (let index = 0; index < matches.length; index += 25) batches.push(matches.slice(index, index + 25));
     const payloads: unknown[] = Array.from({ length: batches.length });
@@ -197,7 +195,7 @@ export class CloudHmsBedbankService implements BedbankService {
     };
     await Promise.all(Array.from({ length: Math.min(this.concurrency, batches.length) }, worker));
     const rates = payloads.flatMap((payload) => array(object(object(payload).data).rates));
-    return rates.flatMap((value): HotelAvailabilityDto[] => {
+    const hotels = rates.flatMap((value): HotelAvailabilityDto[] => {
       const entry = object(value);
       const property = object(entry.property);
       // Rate có totalAmount = 0 là rate chưa nạp giá cho distribution channel (mẫu thật có 15/360
@@ -219,6 +217,8 @@ export class CloudHmsBedbankService implements BedbankService {
         currency: currencyOf(best.totalAmount, string(property.currencySymbol, "VND")),
       }];
     });
+    if (hotels.length === 0) throw noAvailability(destination, search, matches);
+    return hotels;
   }
 
   async rooms(search: SearchRequest & { propertyId: string }): Promise<RoomAvailabilityDto[]> {
