@@ -1,0 +1,47 @@
+name: nt-travel
+
+services:
+  nt-travel:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: nt-travel:local
+    container_name: nt-travel
+    restart: unless-stopped
+    init: true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - npm_network
+    env_file:
+      - path: ./env.production
+        required: false
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3001
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
+      SHUTDOWN_TIMEOUT_MS: ${SHUTDOWN_TIMEOUT_MS:-10000}
+      READINESS_CACHE_MS: ${READINESS_CACHE_MS:-10000}
+    ports:
+      - "127.0.0.1:${NT_TRAVEL_HOST_PORT:-3101}:3001"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health/live').then((response) => { if (!response.ok) process.exit(1); }).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+# nginx-proxy-manager (container gastrack-npm) định tuyến bằng TÊN CONTAINER
+# (`set $server "nt-travel"; set $port 3001`), nên nó phải ở cùng network với service này.
+# Trước đây network do Compose tạo và NPM được `docker network connect` thủ công — không ghi
+# ở đâu, và mọi `docker compose down` đều xoá network đó, làm mất route cho tới khi có người
+# nối lại. Khai báo network của NPM là external: route nằm trong file, và `down` không xoá nó.
+networks:
+  npm_network:
+    external: true

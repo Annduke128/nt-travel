@@ -4,6 +4,7 @@ server-dist/
 .env
 .env.*
 !.env.example
+deploy/env.production
 *.log
 *.core
 core
