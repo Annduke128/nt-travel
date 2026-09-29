@@ -119,6 +119,18 @@ test("adds named guests per room up to that room's capacity and requotes before 
   expect(posted.expectedTotal).toBe(11000000);
 });
 
+test("restores room capacity for an older saved stay whose quote omitted it", async () => {
+  const detail = { propertyId: "p1", roomTypeId: "r1", ratePlanId: "rate1", roomTypeName: "Deluxe", ratePlanName: "Breakfast", quantity: 2, total: 4000000, average: 2000000, currency: "VND", dailyRates: [], policies: [] };
+  const selection: BookingSelection = { requestId: "22222222-2222-4222-8222-222222222222", propertyName: "Demo hotel",
+    search: { destination: "Nha Trang", arrivalDate: "2099-06-01", departureDate: "2099-06-03", rooms: [{ adults: 2, children: 0, infants: 0 }] }, detail };
+  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: [{ ...detail, maxOccupancy: 8 }] }), { status: 200 }));
+  vi.stubGlobal("fetch", fetcher);
+  render(<BookingCheckout selection={selection} draftLegs={[selection]} onCreated={vi.fn()} onBack={vi.fn()} />);
+  expect(await screen.findByText(/2\/8 khách/)).toBeVisible();
+  expect(screen.getByRole("button", { name: "Thêm khách vào phòng 1" })).toBeEnabled();
+  expect(fetcher).toHaveBeenCalledWith("/api/availability/rooms", expect.objectContaining({ method: "POST" }));
+});
+
 test("journey details list every stay and open another leg", async () => {
   const request = { requestId: "22222222-2222-4222-8222-222222222222", journeyId: "11111111-1111-4111-8111-111111111111", journeyLeg: 1,
     destination: "Nha Trang", arrivalDate: "2099-06-01", departureDate: "2099-06-03", propertyId: "p1", roomTypeId: "r1", ratePlanId: "rate1",

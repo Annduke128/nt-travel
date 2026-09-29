@@ -35,6 +35,7 @@ export function BookingCheckout({ selection, onCreated, onBack, onAddLeg, draftL
   const items = selection.items ?? [{ detail, quantity: search.rooms.length }];
   const selectedRoomDetails = items.flatMap((item) => Array.from({ length: item.quantity }, () => item.detail));
   const [roomDetails, setRoomDetails] = useState(() => initialDraft?.roomDetails ?? selectedRoomDetails);
+  const [roomCapacities, setRoomCapacities] = useState(() => selectedRoomDetails.map((room, index) => room.maxOccupancy ?? initialDraft?.roomDetails?.[index]?.maxOccupancy));
   const [roomOccupancies, setRoomOccupancies] = useState(() => initialDraft?.rooms ?? search.rooms);
   const [roomGuests, setRoomGuests] = useState(() => initialDraft?.roomGuests ?? search.rooms.map((room) => Array.from({ length: room.adults + room.children + room.infants }, emptyGuest)));
   const [notes, setNotes] = useState(initialDraft?.notes ?? "");
@@ -45,6 +46,16 @@ export function BookingCheckout({ selection, onCreated, onBack, onAddLeg, draftL
   const [error, setError] = useState("");
   const sending = useRef(false);
   const heading = useBookingHeading("checkout");
+  const needsCapacity = roomCapacities.some((capacity) => capacity === undefined) && (draftLegs.some((leg) => leg.requestId === selection.requestId) || Boolean(initialDraft));
+  useEffect(() => {
+    if (!needsCapacity) return;
+    let active = true;
+    bedbankApi.rooms({ ...search, rooms: [search.rooms[0]!], propertyId: detail.propertyId }).then((rates) => {
+      if (!active) return;
+      setRoomCapacities((current) => current.map((capacity, index) => capacity ?? rates.find((rate) => rate.roomTypeId === selectedRoomDetails[index]!.roomTypeId && rate.ratePlanId === selectedRoomDetails[index]!.ratePlanId)?.maxOccupancy));
+    }).catch(() => { if (active) setError("Chưa tải được sức chứa phòng. Vui lòng quay lại danh sách phòng và chọn lại hạng phòng."); });
+    return () => { active = false; };
+  }, [selection.requestId, needsCapacity]);
   const total = roomDetails.reduce((sum, room) => sum + room.total, 0);
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -77,7 +88,7 @@ export function BookingCheckout({ selection, onCreated, onBack, onAddLeg, draftL
     const currentGuests = roomGuests[roomIndex]!;
     const nextCount = currentGuests.length + delta;
     const minimum = search.rooms[roomIndex]!.adults + search.rooms[roomIndex]!.children + search.rooms[roomIndex]!.infants;
-    const maximum = Math.min(18, selectedRoomDetails[roomIndex]!.maxOccupancy ?? minimum, 8 + currentRoom.children + currentRoom.infants);
+    const maximum = Math.min(18, roomCapacities[roomIndex] ?? minimum, 8 + currentRoom.children + currentRoom.infants);
     if (repricing || busy || nextCount < minimum || nextCount > maximum) return;
     const nextRoom = { ...currentRoom, adults: currentRoom.adults + delta };
     const currentDetail = roomDetails[roomIndex]!;
@@ -100,7 +111,7 @@ export function BookingCheckout({ selection, onCreated, onBack, onAddLeg, draftL
       <fieldset disabled={busy || repricing || uncertain} className="booking-fields">
         {roomGuests.map((room, roomIndex) => {
           const minimum = search.rooms[roomIndex]!.adults + search.rooms[roomIndex]!.children + search.rooms[roomIndex]!.infants;
-          const maximum = Math.min(18, selectedRoomDetails[roomIndex]!.maxOccupancy ?? minimum, 8 + roomOccupancies[roomIndex]!.children + roomOccupancies[roomIndex]!.infants);
+          const maximum = Math.min(18, roomCapacities[roomIndex] ?? minimum, 8 + roomOccupancies[roomIndex]!.children + roomOccupancies[roomIndex]!.infants);
           return <fieldset className="guest-fields" key={roomIndex}><legend>Phòng {roomIndex + 1} · {roomDetails[roomIndex]!.roomTypeName}</legend>
           <div className="guest-room-head"><span>{room.length}/{maximum} khách · {money(roomDetails[roomIndex]!.total, detail.currency)}/phòng</span><small>{repricing ? "Đang cập nhật giá theo số khách…" : "Khách thêm được tính là người lớn; giá sẽ được kiểm tra lại."}</small></div>
           {room.map((guest, guestIndex) => <div className="guest-person" key={guestIndex}><div className="guest-person-head"><h3>Khách {guestIndex + 1}{guestIndex === 0 ? " · Đại diện" : ""}</h3>{guestIndex === room.length - 1 && room.length > minimum ? <button className="guest-remove" type="button" aria-label={`Xóa khách ${guestIndex + 1} · Phòng ${roomIndex + 1}`} onClick={() => void changeGuestCount(roomIndex, -1)}>Xóa khách</button> : null}</div>

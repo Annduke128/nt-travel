@@ -17,6 +17,9 @@ const matchedProperties = (details: unknown): PropertyDto[] => {
   const properties = (details as NoAvailabilityDetails | undefined)?.properties;
   return Array.isArray(properties) ? properties : [];
 };
+const withRoomCapacity = (detail: RateDetailDto, room: RoomAvailabilityDto): RateDetailDto => ({
+  ...detail, maxOccupancy: room.maxOccupancy ?? detail.maxOccupancy,
+});
 function createInitialSearch(): SearchState {
   const arrival = new Date(); arrival.setDate(arrival.getDate() + 1);
   const departure = new Date(); departure.setDate(departure.getDate() + 3);
@@ -197,7 +200,7 @@ function SearchView({ onBook, journeyContext, draftLegs, onOpenDraft }: { onBook
       const result = await bedbankApi.detail({ ...search, rooms: [search.rooms[0]!], propertyId: room.propertyId, roomTypeId: room.roomTypeId, ratePlanId: room.ratePlanId });
       if (version === generation.current) {
         if (chosen.length > 0 && result.currency !== chosen[0]!.detail.currency) setError("Không thể gộp các hạng phòng khác loại tiền tệ trong cùng booking.");
-        else setChosen((current) => [...current, { detail: result, quantity: 1 }]);
+        else setChosen((current) => [...current, { detail: withRoomCapacity(result, room), quantity: 1 }]);
       }
     } catch (reason) { if (version === generation.current) setError(reason instanceof Error ? reason.message : "Không thể tải chi tiết giá"); }
     finally { if (version === generation.current) setBusy(undefined); }
@@ -220,7 +223,7 @@ function SearchView({ onBook, journeyContext, draftLegs, onOpenDraft }: { onBook
     setBusy("detail"); setError("");
     try {
       const result = await bedbankApi.detail({ ...search, rooms: [search.rooms[0]!], propertyId: room.propertyId, roomTypeId: room.roomTypeId, ratePlanId: room.ratePlanId });
-      if (version === generation.current) { setDetail(result); if (book) startBooking(result); }
+      if (version === generation.current) { const rated = withRoomCapacity(result, room); setDetail(rated); if (book) startBooking(rated); }
     } catch (reason) { if (version === generation.current) setError(reason instanceof Error ? reason.message : "Không thể tải chi tiết giá"); }
     finally { if (version === generation.current) setBusy(undefined); }
   };

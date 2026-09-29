@@ -279,6 +279,23 @@ describe("NT Travel bedbank v1", () => {
     expect(screen.getByLabelText("Yêu cầu đặc biệt")).toHaveValue("Giường phụ");
   });
 
+  test("keeps the room-list capacity when the detail quote omits it", async () => {
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation(async (url, init) => {
+      const response = await original(url, init);
+      if (String(url) !== "/api/availability/rooms") return response;
+      const payload = await response.json();
+      return json({ data: payload.data.map((room: Record<string, unknown>) => ({ ...room, maxOccupancy: 8 })) });
+    });
+    const user = await searchFor("Nha Trang");
+    await user.click(await screen.findByRole("button", { name: /xem phòng tại vinpearl beachfront/i }));
+    expect(screen.getByText("Tối đa 8 khách/phòng")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Đặt phòng Deluxe Ocean" }));
+    expect(await screen.findByText(/2\/8 khách/)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Thêm khách vào phòng 1" }));
+    expect(await screen.findByLabelText("Tên khách · Phòng 1 · Khách 3")).toBeVisible();
+  });
+
   test("adding from an older booking uses the latest persisted journey leg", async () => {
     const original = vi.mocked(fetch).getMockImplementation()!;
     const journeyId = "11111111-1111-4111-8111-111111111111";
@@ -354,8 +371,8 @@ describe("NT Travel bedbank v1", () => {
     vi.mocked(fetch).mockImplementation((url, init) => {
       if (url === "/api/availability/hotels") return json({ data: [{ id: "p1", name: "Vinpearl Beachfront Nha Trang", city: "Nha Trang", imageUrl: "https://example.com/hotel.jpg", quantity: 4, fromPrice: 2450000, currency: "VND" }] });
       if (url === "/api/availability/rooms") return json({ data: [
-        { propertyId: "p1", roomTypeId: "r1", roomTypeName: "Deluxe Ocean", ratePlanId: "rate1", ratePlanName: "Breakfast", quantity: 4, total: 4900000, average: 2450000, currency: "VND" },
-        { propertyId: "p1", roomTypeId: "r2", roomTypeName: "Suite", ratePlanId: "rate2", ratePlanName: "Flexible", quantity: 2, total: 7000000, average: 3500000, currency: "VND" },
+        { propertyId: "p1", roomTypeId: "r1", roomTypeName: "Deluxe Ocean", ratePlanId: "rate1", ratePlanName: "Breakfast", quantity: 4, total: 4900000, average: 2450000, currency: "VND", maxOccupancy: 8 },
+        { propertyId: "p1", roomTypeId: "r2", roomTypeName: "Suite", ratePlanId: "rate2", ratePlanName: "Flexible", quantity: 2, total: 7000000, average: 3500000, currency: "VND", maxOccupancy: 4 },
       ] });
       if (url === "/api/availability/detail") {
         const query = JSON.parse(String(init?.body));
@@ -392,6 +409,8 @@ describe("NT Travel bedbank v1", () => {
     const priceLines = within(screen.getByRole("list", { name: "Giá từng phòng" })).getAllByRole("listitem");
     expect(priceLines[0]).toHaveTextContent(/Deluxe Ocean.*4\.900\.000/);
     expect(priceLines[1]).toHaveTextContent(/Suite.*7\.000\.000/);
+    expect(screen.getByText(/2\/8 khách/)).toBeVisible();
+    expect(screen.getByText(/2\/4 khách/)).toBeVisible();
   });
 
   test("a rate plan without upstream tax shows a dash, never zero", async () => {
