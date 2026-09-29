@@ -14,17 +14,18 @@ const input: BookingCreateRequest = {
   requestId: "22222222-2222-4222-8222-222222222222", destination: "Phú Quốc", arrivalDate: "2026-06-01", departureDate: "2026-06-03",
   propertyId: "c67377fc-d81d-4208-add9-47e32b69f998", roomTypeId: "5051e26c-e710-4028-90ae-ad929b0309e7", ratePlanId: "1604924a-a9c1-4197-b013-2e61d6a193d0",
   rooms: [{ adults: 2, children: 1, infants: 0 }], guests: [{ firstName: "An", lastName: "Nguyen", email: "guest@example.com", phoneNumber: "0912345678" }],
+  roomGuests: [[{ firstName: "An", lastName: "Nguyen", email: "guest@example.com", phoneNumber: "0912345678" }, { firstName: "Binh", lastName: "Tran", email: "binh@example.com", phoneNumber: "0912345679" }, { firstName: "Chi", lastName: "Le", email: "chi@example.com", phoneNumber: "0912345680" }]],
   expectedTotal: 1800000, currency: "VND", acceptedPolicies: true, notes: "Late arrival",
 };
 function setup() {
-  const request = vi.fn(async () => structuredClone(inventory));
+  const request = vi.fn(async (_path: string) => structuredClone(inventory));
   const bedbank = new MockBedbankService();
   vi.spyOn(bedbank, "detail").mockResolvedValue({ propertyId: input.propertyId, roomTypeId: input.roomTypeId, ratePlanId: input.ratePlanId,
     roomTypeName: "Standard King", ratePlanName: "PHMS-T18", quantity: 0, total: 1800000, average: 900000, currency: "VND", maxOccupancy: 4,
     dailyRates: [{ date: "2026-06-01", amount: 900000 }, { date: "2026-06-02", amount: 900000 }], policies: [] });
   const gateway = new CloudHmsBookingGateway({ request } as unknown as CloudHmsClient, bedbank, { organizationCode: "org", distributionChannelId: "channel", requestorId: "requestor", sourceCode: "CRO",
     travelAgentName: "NT_Travel", travelAgentProfileId: "ta-profile" });
-  return { request, gateway };
+  return { request, gateway, bedbank };
 }
 describe("CiHMS booking contract", () => {
   test("prepares daily room rates using real allotments and current detail pricing", async () => {
@@ -44,20 +45,109 @@ describe("CiHMS booking contract", () => {
     expect(profiles).toContainEqual({ firstName: "NT_Travel", profileRefID: "ta-profile", profileType: "TravelAgent" });
     expect(profiles).toContainEqual({ profileRefID: "BookingPortal", profileType: "BookingClient" });
   });
+  test("sends every named occupant as a Guest profile for the room", async () => {
+    const { gateway } = setup();
+    const roomGuests = [input.guests[0]!,
+      { firstName: "Binh", lastName: "Tran", email: "binh@example.com", phoneNumber: "0912345679" },
+      { firstName: "Chi", lastName: "Le", email: "chi@example.com", phoneNumber: "0912345680" }];
+    const prepared = await gateway.prepare({ ...input, roomGuests: [roomGuests] }, actor, "ref");
+    const profiles = (prepared.body as { reservations: { profiles: { profileType: string; firstName: string }[] }[] }).reservations[0]!.profiles;
+    expect(profiles.filter((profile) => profile.profileType === "Guest").map((profile) => profile.firstName)).toEqual(["An", "Binh", "Chi"]);
+  });
   test("refuses an unrelated room rate instead of taking the first returned rate", async () => {
     const { gateway } = setup();
     await expect(gateway.prepare({ ...input, ratePlanId: "another-plan" }, actor, "ref")).rejects.toMatchObject({ code: "NO_AVAILABILITY" });
   });
   test("creates one reservation per room with its own guest", async () => {
     const { gateway } = setup();
-    const prepared = await gateway.prepare({ ...input, rooms: [input.rooms[0]!, input.rooms[0]!], guests: [input.guests[0]!, { ...input.guests[0]!, firstName: "Binh" }] }, actor, "ref");
+    const prepared = await gateway.prepare({ ...input, rooms: [input.rooms[0]!, input.rooms[0]!], guests: [input.guests[0]!, { ...input.guests[0]!, firstName: "Binh" }],
+      roomGuests: [input.roomGuests[0]!, [{ ...input.guests[0]!, firstName: "Binh" }, ...input.roomGuests[0]!.slice(1)]], expectedTotal: 3600000 }, actor, "ref");
     expect(prepared.total).toBe(3600000);
     expect((prepared.body as { reservations: unknown[] }).reservations).toHaveLength(2);
+  });
+  test("prepares different rate plans with a checked price for each room in one booking", async () => {
+    const { gateway, request, bedbank } = setup();
+    const mixedInventory = structuredClone(inventory);
+    const secondRate = structuredClone(mixedInventory.data.rates[0]!.rates[0]!);
+    secondRate.roomTypeID = "second-room";
+    secondRate.ratePlanID = "second-plan";
+    secondRate.quantity = 1;
+    secondRate.rateAvailablity.roomTypeId = "second-room";
+    secondRate.rateAvailablity.ratePlanId = "second-plan";
+    secondRate.rateAvailablity.roomTypeCode = "SECOND";
+    secondRate.rateAvailablity.ratePlanCode = "PLAN2";
+    secondRate.rateAvailablity.allotments = [{ ...secondRate.rateAvailablity.allotments[0]!, id: "second-allotment", allotmentId: "second-allotment", quantity: 1 }];
+    mixedInventory.data.rates[0]!.rates.push(secondRate);
+    request.mockResolvedValue(mixedInventory);
+    vi.mocked(bedbank.detail).mockImplementation(async (query) => ({
+      propertyId: input.propertyId, roomTypeId: query.roomTypeId, ratePlanId: query.ratePlanId,
+      roomTypeName: query.roomTypeId === "second-room" ? "Suite" : "Standard King",
+      ratePlanName: query.ratePlanId === "second-plan" ? "Flexible" : "PHMS-T18",
+      quantity: 2, maxOccupancy: 4, total: query.roomTypeId === "second-room" ? 3000000 : 1800000,
+      average: 900000, currency: "VND", dailyRates: [
+        { date: "2026-06-01", amount: 900000 }, { date: "2026-06-02", amount: 900000 },
+      ], policies: [],
+    }));
+    const mixed = { ...input, rooms: [input.rooms[0]!, input.rooms[0]!],
+      guests: [input.guests[0]!, { ...input.guests[0]!, firstName: "Binh" }],
+      roomGuests: [input.roomGuests[0]!, [{ ...input.guests[0]!, firstName: "Binh" }, ...input.roomGuests[0]!.slice(1)]],
+      roomSelections: [
+        { roomTypeId: input.roomTypeId, ratePlanId: input.ratePlanId, expectedUnitTotal: 1800000 },
+        { roomTypeId: "second-room", ratePlanId: "second-plan", expectedUnitTotal: 3000000 },
+      ], expectedTotal: 4800000 };
+    const prepared = await gateway.prepare(mixed, actor, "ref");
+    const reservations = (prepared.body as { reservations: { totalAmount: { amount: number }; roomRates: { roomTypeRefID: string }[] }[] }).reservations;
+    expect(prepared.total).toBe(4800000);
+    expect(reservations.map((item) => item.totalAmount.amount)).toEqual([1800000, 3000000]);
+    expect(reservations.map((item) => item.roomRates[0]?.roomTypeRefID)).toEqual([input.roomTypeId, "second-room"]);
+    expect(request).toHaveBeenCalledWith("/common-trd/v1/crs/booking/get-hotel-availability", expect.objectContaining({ body: expect.objectContaining({ numberOfRoom: 1 }) }));
+  });
+  test("does not count the same allotment twice across rate plans", async () => {
+    const { gateway, request, bedbank } = setup();
+    const sharedInventory = structuredClone(inventory);
+    const firstRate = sharedInventory.data.rates[0]!.rates[0]!;
+    firstRate.quantity = 1;
+    firstRate.rateAvailablity.allotments = [{ ...firstRate.rateAvailablity.allotments[0]!, quantity: 1 }];
+    const secondRate = structuredClone(firstRate);
+    secondRate.ratePlanID = "second-plan";
+    secondRate.rateAvailablity.ratePlanId = "second-plan";
+    secondRate.rateAvailablity.ratePlanCode = "PLAN2";
+    sharedInventory.data.rates[0]!.rates.push(secondRate);
+    request.mockResolvedValue(sharedInventory);
+    vi.mocked(bedbank.detail).mockImplementation(async (query) => ({ propertyId: input.propertyId, roomTypeId: input.roomTypeId, ratePlanId: query.ratePlanId,
+      roomTypeName: "Standard King", ratePlanName: "PHMS-T18", quantity: 2, maxOccupancy: 4, total: 1800000, average: 900000, currency: "VND",
+      dailyRates: [{ date: "2026-06-01", amount: 900000 }, { date: "2026-06-02", amount: 900000 }], policies: [] }));
+    const mixed = { ...input, rooms: [input.rooms[0]!, input.rooms[0]!], guests: [input.guests[0]!, input.guests[0]!], expectedTotal: 3600000,
+      roomSelections: [
+        { roomTypeId: input.roomTypeId, ratePlanId: input.ratePlanId, expectedUnitTotal: 1800000 },
+        { roomTypeId: input.roomTypeId, ratePlanId: "second-plan", expectedUnitTotal: 1800000 },
+      ] };
+    await expect(gateway.prepare(mixed, actor, "ref")).rejects.toMatchObject({ code: "NO_AVAILABILITY" });
   });
   test("reads documented creation, guarantee, and per-item commit envelopes", () => {
     expect(parseBookingReservations(created, false)[0]).toMatchObject({ id: "52ccb695-fbd8-4ed4-bcf0-8a05a6412f58", status: "Prospect", confirmationNumber: "VOPQ24407" });
     expect(parseBookingReservations(confirmed, true)[0]).toMatchObject({ status: "Reserved", confirmationNumber: "VOPQ24410" });
     expect(parseBookingGuarantee(guarantees)).toMatchObject({ amount: 20000015, currency: "VND", methods: expect.arrayContaining([expect.objectContaining({ amount: 4000003 })]) });
+  });
+  test("loads guarantees for a group in bounded parallel batches", async () => {
+    const { gateway, request } = setup();
+    let active = 0;
+    let peak = 0;
+    request.mockImplementation(async (path) => {
+      active += 1;
+      peak = Math.max(peak, active);
+      await Promise.resolve();
+      active -= 1;
+      const id = String(path).split("/").at(-2)!;
+      const payload = structuredClone(guarantees);
+      payload.data.reservationId = id;
+      payload.data.guaranteeMethods.forEach((method) => { method.reservationId = id; });
+      return payload as never;
+    });
+    const ids = Array.from({ length: 8 }, (_, index) => `reservation-${index}`);
+    expect((await gateway.guarantees(ids)).map((item) => item.reservationId)).toEqual(ids);
+    expect(peak).toBeGreaterThan(1);
+    expect(peak).toBeLessThanOrEqual(4);
   });
   test("rejects a guarantee method without its policy reference", () => {
     const payload = structuredClone(guarantees);

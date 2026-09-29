@@ -9,7 +9,8 @@ const actor: Profile = { userId: "user-1", displayName: "NT Staff", email: "staf
 const input: BookingCreateRequest = {
   requestId: "22222222-2222-4222-8222-222222222222", destination: "Nha Trang", arrivalDate: "2027-06-01", departureDate: "2027-06-03",
   rooms: [{ adults: 2, children: 0, infants: 0 }], propertyId: "p1", roomTypeId: "r1", ratePlanId: "rate1",
-  expectedTotal: 1800000, currency: "VND", guests: [{ firstName: "An", lastName: "Nguyen", email: "guest@example.com", phoneNumber: "0912345678" }], notes: "", acceptedPolicies: true,
+  expectedTotal: 1800000, currency: "VND", guests: [{ firstName: "An", lastName: "Nguyen", email: "guest@example.com", phoneNumber: "0912345678" }],
+  roomGuests: [[{ firstName: "An", lastName: "Nguyen", email: "guest@example.com", phoneNumber: "0912345678" }, { firstName: "Binh", lastName: "Tran", email: "binh@example.com", phoneNumber: "0912345679" }]], notes: "", acceptedPolicies: true,
 };
 const reservation = { id: "res1", confirmationNumber: "VP123", status: "Prospect" };
 const guarantee: BookingGuarantee = { reservationId: "res1", amount: 500000, currency: "VND", methods: [{ id: "g1", policyRefId: "p1", type: "Deposit", amount: 500000, currency: "VND" }] };
@@ -49,6 +50,24 @@ describe("booking lifecycle", () => {
     const { service } = setup();
     await service.create(actor, input);
     await expect(service.create(actor, { ...input, notes: "changed" })).rejects.toMatchObject({ code: "BOOKING_CONFLICT" });
+  });
+
+  test("lists every persisted journey leg and rejects duplicate leg numbers", async () => {
+    const { service } = setup();
+    const journeyId = "11111111-1111-4111-8111-111111111111";
+    await service.create(actor, { ...input, journeyId, journeyLeg: 1 });
+    await service.create(actor, { ...input, requestId: "33333333-3333-4333-8333-333333333333", journeyId, journeyLeg: 2 });
+    expect((await service.listJourney(actor, journeyId)).map((booking) => booking.request.journeyLeg)).toEqual([1, 2]);
+    await expect(service.create(actor, { ...input, requestId: "44444444-4444-4444-8444-444444444444", journeyId, journeyLeg: 2 }))
+      .rejects.toMatchObject({ code: "BOOKING_CONFLICT" });
+    expect(await service.listJourney({ ...actor, userId: "other" }, journeyId)).toEqual([]);
+  });
+
+  test("includes an older booking when a new journey starts from it", async () => {
+    const { service } = setup();
+    await service.create(actor, input);
+    await service.create(actor, { ...input, requestId: "33333333-3333-4333-8333-333333333333", journeyId: input.requestId, journeyLeg: 2 });
+    expect((await service.listJourney(actor, input.requestId)).map((booking) => booking.id)).toEqual([input.requestId, "33333333-3333-4333-8333-333333333333"]);
   });
 
   test("another staff member cannot see or confirm this booking", async () => {

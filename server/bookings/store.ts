@@ -7,6 +7,7 @@ export interface BookingStore {
   health(): Promise<void>;
   get(id: string, actorId: string): Promise<BookingRecord | undefined>;
   list(actorId: string): Promise<BookingDto[]>;
+  listJourney(actorId: string, journeyId: string): Promise<BookingDto[]>;
   insert(record: BookingRecord): Promise<boolean>;
   save(record: BookingRecord, expected: BookingStatus): Promise<boolean>;
 }
@@ -23,8 +24,17 @@ export class MemoryBookingStore implements BookingStore {
     return [...this.records.values()].filter((record) => record.actorId === actorId)
       .map((record) => structuredClone(record.booking)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 100);
   }
+  async listJourney(actorId: string, journeyId: string) {
+    return [...this.records.values()].filter((record) => record.actorId === actorId && (record.booking.request.journeyId === journeyId
+      || (record.booking.id === journeyId && !record.booking.request.journeyId)))
+      .map((record) => structuredClone(record.booking)).sort((a, b) => (a.request.journeyLeg ?? 1) - (b.request.journeyLeg ?? 1));
+  }
   async insert(record: BookingRecord) {
     if (this.records.has(record.booking.id)) return false;
+    const { journeyId, journeyLeg } = record.booking.request;
+    if (journeyId && [...this.records.values()].some((item) => item.actorId === record.actorId
+      && (item.booking.request.journeyId === journeyId || (item.booking.id === journeyId && !item.booking.request.journeyId))
+      && (item.booking.request.journeyLeg ?? 1) === journeyLeg)) return false;
     this.records.set(record.booking.id, structuredClone(record));
     return true;
   }
@@ -55,6 +65,17 @@ export class SupabaseBookingStore implements BookingStore {
     const { data, error } = await this.client.from("bookings").select("payload").eq("actor_id", actorId).order("created_at", { ascending: false }).limit(100);
     if (error) throw unavailable();
     return (data ?? []).map((row) => row.payload as BookingDto);
+  }
+  async listJourney(actorId: string, journeyId: string): Promise<BookingDto[]> {
+    const [legacy, { data, error }] = await Promise.all([
+      this.get(journeyId, actorId),
+      this.client.from("bookings").select("payload").eq("actor_id", actorId)
+        .eq("payload->request->>journeyId", journeyId).order("created_at", { ascending: true }),
+    ]);
+    if (error) throw unavailable();
+    const items = (data ?? []).map((row) => row.payload as BookingDto);
+    if (legacy && !legacy.booking.request.journeyId) items.push(legacy.booking);
+    return items.sort((a, b) => (a.request.journeyLeg ?? 1) - (b.request.journeyLeg ?? 1));
   }
   async insert(record: BookingRecord) {
     const { error } = await this.client.from("bookings").insert({ id: record.booking.id, actor_id: record.actorId,

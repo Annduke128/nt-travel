@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import App from "./App";
@@ -11,6 +11,7 @@ function json(body: unknown, status = 200) {
 }
 
 beforeEach(() => {
+  localStorage.clear();
   vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url === "/api/me") return json({ data: { profile: admin } });
@@ -18,6 +19,7 @@ beforeEach(() => {
     if (url === "/api/availability/hotels") return json({ data: [{ id: "p1", name: "Vinpearl Beachfront Nha Trang", city: "Nha Trang", quantity: 4, fromPrice: 2450000, currency: "VND" }] });
     if (url === "/api/availability/rooms") return json({ data: [{ propertyId: "p1", roomTypeId: "r1", roomTypeName: "Deluxe Ocean", ratePlanId: "rate1", ratePlanName: "Linh hoạt · Bao gồm bữa sáng", quantity: 4, total: 4900000, average: 2450000, tax: 490000, currency: "VND", maxOccupancy: 3 }] });
     if (url === "/api/availability/detail") return json({ data: { propertyId: "p1", roomTypeId: "r1", roomTypeName: "Deluxe Ocean", ratePlanId: "rate1", ratePlanName: "Linh hoạt · Bao gồm bữa sáng", quantity: 4, total: 4900000, average: 2450000, tax: 490000, currency: "VND", dailyRates: [{ date: "2026-07-23", amount: 2450000, tax: 245000 }, { date: "2026-07-24", amount: 2450000, tax: 245000 }], policies: [{ type: "Hủy phòng", description: "Miễn phí hủy trước 3 ngày." }] } });
+    if (url.startsWith("/api/journeys/")) return json({ data: [] });
     if (url === "/api/admin/users") return init?.method === "POST" ? json({ data: staff }, 201) : json({ data: [admin, staff] });
     return json({ error: { code: "VALIDATION_ERROR", message: `Unexpected ${url}` } }, 400);
   }));
@@ -150,6 +152,10 @@ describe("NT Travel bedbank v1", () => {
     await user.type(screen.getByLabelText("Tên khách · Phòng 1"), "An");
     await user.type(screen.getByLabelText("Email · Phòng 1"), "guest@example.com");
     await user.type(screen.getByLabelText("Điện thoại · Phòng 1"), "0912345678");
+    await user.type(screen.getByLabelText("Họ khách · Phòng 1 · Khách 2"), "Tran");
+    await user.type(screen.getByLabelText("Tên khách · Phòng 1 · Khách 2"), "Binh");
+    await user.type(screen.getByLabelText("Email · Phòng 1 · Khách 2"), "binh@example.com");
+    await user.type(screen.getByLabelText("Điện thoại · Phòng 1 · Khách 2"), "0912345679");
     await user.click(screen.getByRole("checkbox", { name: /đã đọc.*chính sách/i }));
     await user.click(screen.getByRole("button", { name: "Tạo đặt phòng" }));
     expect((await screen.findAllByText("Chờ xác nhận"))[0]).toBeVisible();
@@ -158,6 +164,129 @@ describe("NT Travel bedbank v1", () => {
     await user.click(screen.getByRole("button", { name: "Xác nhận đặt phòng" }));
     expect(await screen.findByRole("heading", { name: "Đặt phòng đã xác nhận" })).toBeVisible();
     expect(screen.getByText("DEMO-123")).toBeVisible();
+  });
+
+  test("adds another stay under one journey code with a separate booking ID", async () => {
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    const created: { requestId: string; journeyId: string; journeyLeg: number; arrivalDate: string }[] = [];
+    vi.mocked(fetch).mockImplementation((url, init) => {
+      if (url === "/api/bookings" && init?.method === "POST") {
+        const request = JSON.parse(String(init.body));
+        created.push(request);
+        return json({ data: { id: request.requestId, reference: `NT-${request.requestId}`, request, status: "confirmed", mode: "mock", createdAt: new Date().toISOString(), propertyName: "Demo hotel", roomTypeName: "Deluxe Ocean", ratePlanName: "Breakfast", total: request.expectedTotal, currency: "VND", reservations: [{ id: request.requestId, confirmationNumber: "DEMO", status: "Reserved" }] } }, 201);
+      }
+      return original(url, init);
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    const bookStay = async () => {
+      await user.type(await screen.findByLabelText("Điểm đến hoặc khách sạn"), "Nha Trang");
+      await user.clear(screen.getByLabelText("Người lớn mỗi phòng"));
+      await user.type(screen.getByLabelText("Người lớn mỗi phòng"), "1");
+      await user.click(screen.getByRole("button", { name: "Tìm khách sạn" }));
+      await user.click(await screen.findByRole("button", { name: /xem phòng tại vinpearl beachfront/i }));
+      await user.click(await screen.findByRole("button", { name: "Đặt phòng Deluxe Ocean" }));
+      await user.type(await screen.findByLabelText("Họ khách · Phòng 1"), "Nguyen");
+      await user.type(screen.getByLabelText("Tên khách · Phòng 1"), "An");
+      await user.type(screen.getByLabelText("Email · Phòng 1"), "an@example.com");
+      await user.type(screen.getByLabelText("Điện thoại · Phòng 1"), "0912345678");
+      await user.click(screen.getByRole("checkbox", { name: /đã đọc.*chính sách/i }));
+      await user.click(screen.getByRole("button", { name: "Tạo đặt phòng" }));
+      await screen.findByRole("heading", { name: "Đặt phòng đã xác nhận" });
+    };
+    await bookStay();
+    expect(screen.getByText(/Mã hành trình: NT-J-/)).toBeVisible();
+    await user.click(await screen.findByRole("button", { name: "Thêm chặng" }));
+    expect(await screen.findByText(/Đang thêm chặng 2/)).toBeVisible();
+    await bookStay();
+    expect(created).toHaveLength(2);
+    expect(created[0]!.requestId).not.toBe(created[1]!.requestId);
+    expect(created[0]!.journeyId).toBe(created[1]!.journeyId);
+    expect(created.map((item) => item.journeyLeg)).toEqual([1, 2]);
+  });
+
+  test("can add a second stay to the journey before creating either booking", async () => {
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation((url, init) => {
+      if (url === "/api/bookings" && init?.method === "POST") {
+        const request = JSON.parse(String(init.body));
+        return json({ data: { id: request.requestId, reference: `NT-${request.requestId}`, request, status: "confirmed", mode: "mock", createdAt: new Date().toISOString(), propertyName: "Vinpearl Beachfront Nha Trang", roomTypeName: "Deluxe Ocean", ratePlanName: "Breakfast", total: request.expectedTotal, currency: "VND", reservations: [{ id: "res1", confirmationNumber: "DEMO", status: "Reserved" }] } }, 201);
+      }
+      return original(url, init);
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    const selectStay = async () => {
+      await user.type(await screen.findByLabelText("Điểm đến hoặc khách sạn"), "Nha Trang");
+      await user.click(screen.getByRole("button", { name: "Tìm khách sạn" }));
+      await user.click(await screen.findByRole("button", { name: /xem phòng tại vinpearl beachfront/i }));
+      await user.click(await screen.findByRole("button", { name: "Đặt phòng Deluxe Ocean" }));
+      await screen.findByRole("heading", { name: "Thông tin đặt phòng" });
+    };
+    await selectStay();
+    await user.type(screen.getByLabelText("Họ khách · Phòng 1"), "Nguyen");
+    await user.type(screen.getByLabelText("Yêu cầu đặc biệt"), "Nhận phòng muộn");
+    await user.click(screen.getByRole("checkbox", { name: /đã đọc.*chính sách/i }));
+    await user.click(screen.getByRole("button", { name: "Thêm chặng" }));
+    expect(await screen.findByText(/Đang thêm chặng 2/)).toBeVisible();
+    await selectStay();
+    expect(screen.getByText(/2 chặng trong hành trình/)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Mở chặng 1" }));
+    expect(await screen.findByRole("heading", { name: "Thông tin đặt phòng" })).toBeVisible();
+    expect(screen.getByText(/Chặng 1.*Vinpearl Beachfront/)).toBeVisible();
+    expect(screen.getByLabelText("Họ khách · Phòng 1")).toHaveValue("Nguyen");
+    expect(screen.getByLabelText("Yêu cầu đặc biệt")).toHaveValue("Nhận phòng muộn");
+    expect(screen.getByRole("checkbox", { name: /đã đọc.*chính sách/i })).toBeChecked();
+    await user.type(screen.getByLabelText("Tên khách · Phòng 1"), "An");
+    await user.type(screen.getByLabelText("Email · Phòng 1"), "an@example.com");
+    await user.type(screen.getByLabelText("Điện thoại · Phòng 1"), "0912345678");
+    await user.type(screen.getByLabelText("Họ khách · Phòng 1 · Khách 2"), "Tran");
+    await user.type(screen.getByLabelText("Tên khách · Phòng 1 · Khách 2"), "Binh");
+    await user.type(screen.getByLabelText("Email · Phòng 1 · Khách 2"), "binh@example.com");
+    await user.type(screen.getByLabelText("Điện thoại · Phòng 1 · Khách 2"), "0912345679");
+    await user.click(screen.getByRole("button", { name: "Tạo đặt phòng" }));
+    expect(await screen.findByRole("button", { name: "Tiếp tục chặng 2" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Tiếp tục chặng 2" }));
+    expect(await screen.findByRole("heading", { name: "Thông tin đặt phòng" })).toBeVisible();
+  });
+
+  test("restores an unbooked stay and its guest details after reload", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.type(await screen.findByLabelText("Điểm đến hoặc khách sạn"), "Nha Trang");
+    await user.click(screen.getByRole("button", { name: "Tìm khách sạn" }));
+    await user.click(await screen.findByRole("button", { name: /xem phòng tại vinpearl beachfront/i }));
+    await user.click(await screen.findByRole("button", { name: "Đặt phòng Deluxe Ocean" }));
+    await user.type(await screen.findByLabelText("Họ khách · Phòng 1"), "Nguyen");
+    await user.type(screen.getByLabelText("Yêu cầu đặc biệt"), "Giường phụ");
+    await waitFor(() => expect(localStorage.getItem("nt-journey-drafts:admin-1")).toContain("Giường phụ"));
+    cleanup();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: /Mở chặng 1 · Vinpearl Beachfront/ }));
+    expect(screen.getByLabelText("Họ khách · Phòng 1")).toHaveValue("Nguyen");
+    expect(screen.getByLabelText("Yêu cầu đặc biệt")).toHaveValue("Giường phụ");
+  });
+
+  test("adding from an older booking uses the latest persisted journey leg", async () => {
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    const journeyId = "11111111-1111-4111-8111-111111111111";
+    const request = { requestId: "22222222-2222-4222-8222-222222222222", journeyId, journeyLeg: 1, destination: "Nha Trang",
+      arrivalDate: "2099-06-01", departureDate: "2099-06-03", rooms: [{ adults: 1, children: 0, infants: 0 }],
+      propertyId: "p1", roomTypeId: "r1", ratePlanId: "rate1", expectedTotal: 4900000, currency: "VND", guests: [], roomGuests: [], notes: "", acceptedPolicies: true };
+    const first = { id: request.requestId, reference: `NT-${request.requestId}`, request, status: "confirmed", mode: "mock", createdAt: "2099-01-01",
+      propertyName: "Hotel One", roomTypeName: "Deluxe", ratePlanName: "Breakfast", total: 4900000, currency: "VND", reservations: [{ id: "res1", confirmationNumber: "A", status: "Reserved" }] };
+    const second = { ...first, id: "33333333-3333-4333-8333-333333333333", propertyName: "Hotel Two", request: { ...request, requestId: "33333333-3333-4333-8333-333333333333", journeyLeg: 2 } };
+    vi.mocked(fetch).mockImplementation((url, init) => {
+      if (url === "/api/bookings") return json({ data: [first] });
+      if (url === `/api/journeys/${journeyId}/bookings`) return json({ data: [first, second] });
+      return original(url, init);
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "Đặt phòng của tôi" }));
+    await user.click(await screen.findByRole("button", { name: "Xem đặt phòng" }));
+    await user.click(await screen.findByRole("button", { name: "Thêm chặng" }));
+    expect(await screen.findByText(/Đang thêm chặng 3/)).toBeVisible();
   });
 
   test("changing search dates clears old room choices", async () => {
@@ -198,12 +327,53 @@ describe("NT Travel bedbank v1", () => {
     await user.type(screen.getByLabelText("Điểm đến hoặc khách sạn"), "Nha Trang");
     await user.click(screen.getByRole("button", { name: "Tìm khách sạn" }));
     await user.click(await screen.findByRole("button", { name: /xem phòng tại vinpearl beachfront/i }));
+    expect(await screen.findByText("Giá net / phòng / kỳ")).toBeVisible();
     await user.click(await screen.findByRole("button", { name: /xem giá chi tiết deluxe ocean/i }));
 
     expect(await screen.findByRole("heading", { name: "Chi tiết giá net" })).toBeVisible();
+    expect(screen.getAllByText("Giá net / phòng / kỳ")).toHaveLength(2);
     expect(screen.getAllByText(/4\.900\.000/).length).toBeGreaterThan(0);
     expect(screen.getByText("Miễn phí hủy trước 3 ngày.")).toBeVisible();
     expect(screen.getByRole("button", { name: "Tiếp tục đặt phòng" })).toBeVisible();
+  });
+
+  test("selects two room categories and shows each unit price before booking", async () => {
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation((url, init) => {
+      if (url === "/api/availability/rooms") return json({ data: [
+        { propertyId: "p1", roomTypeId: "r1", roomTypeName: "Deluxe Ocean", ratePlanId: "rate1", ratePlanName: "Breakfast", quantity: 4, total: 4900000, average: 2450000, currency: "VND" },
+        { propertyId: "p1", roomTypeId: "r2", roomTypeName: "Suite", ratePlanId: "rate2", ratePlanName: "Flexible", quantity: 2, total: 7000000, average: 3500000, currency: "VND" },
+      ] });
+      if (url === "/api/availability/detail") {
+        const query = JSON.parse(String(init?.body));
+        const suite = query.roomTypeId === "r2";
+        return json({ data: { propertyId: "p1", roomTypeId: query.roomTypeId, ratePlanId: query.ratePlanId,
+          roomTypeName: suite ? "Suite" : "Deluxe Ocean", ratePlanName: suite ? "Flexible" : "Breakfast",
+          quantity: suite ? 2 : 4, total: suite ? 7000000 : 4900000, average: suite ? 3500000 : 2450000,
+          currency: "VND", dailyRates: [], policies: [] } });
+      }
+      return original(url, init);
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await user.type(await screen.findByLabelText("Điểm đến hoặc khách sạn"), "Nha Trang");
+    await user.clear(screen.getByLabelText("Số phòng"));
+    await user.type(screen.getByLabelText("Số phòng"), "2");
+    await user.click(screen.getByRole("button", { name: "Tìm khách sạn" }));
+    expect(JSON.parse(String(vi.mocked(fetch).mock.calls.find(([url]) => url === "/api/availability/hotels")?.[1]?.body)).rooms).toHaveLength(1);
+    await user.click(await screen.findByRole("button", { name: /xem phòng tại vinpearl beachfront/i }));
+    expect(JSON.parse(String(vi.mocked(fetch).mock.calls.find(([url]) => url === "/api/availability/rooms")?.[1]?.body)).rooms).toHaveLength(1);
+    await user.click(await screen.findByRole("button", { name: "Chọn Deluxe Ocean" }));
+    await user.click(screen.getByRole("button", { name: "Chọn Suite" }));
+    expect(screen.getByText(/Deluxe Ocean.*4\.900\.000/)).toBeVisible();
+    expect(screen.getByText(/Suite.*7\.000\.000/)).toBeVisible();
+    expect(screen.getByText(/11\.900\.000/)).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Đặt phòng Deluxe Ocean" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Xem giá chi tiết Deluxe Ocean" }));
+    await user.click(await screen.findByRole("button", { name: "Tiếp tục đặt phòng" }));
+    expect(await screen.findByRole("heading", { name: "Thông tin đặt phòng" })).toBeVisible();
+    expect(screen.getByText(/Deluxe Ocean.*4\.900\.000/)).toBeVisible();
+    expect(screen.getByText(/Suite.*7\.000\.000/)).toBeVisible();
   });
 
   test("a rate plan without upstream tax shows a dash, never zero", async () => {

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { BedDouble, CalendarDays, Check, Hotel, LogOut, Search, ShieldCheck, UserCog, UsersRound, X } from "lucide-react";
+import { MAX_BOOKING_ROOMS } from "../shared/contracts";
 import type { BookingDto, HotelAvailabilityDto, NoAvailabilityDetails, Profile, PropertyDto, RateDetailDto, RoomAvailabilityDto, SearchRequest } from "../shared/contracts";
 import { ApiError, bedbankApi } from "./api";
-import { BookingCheckout, BookingDetails, BookingsList, type BookingSelection } from "./Booking";
+import { BookingCheckout, BookingDetails, BookingsList, type BookingDraftFields, type BookingSelection } from "./Booking";
 
 type View = "search" | "users" | "bookings" | "checkout" | "booking";
 type SearchState = SearchRequest & { roomCount: number; adults: number; children: number; infants: number };
@@ -60,8 +61,8 @@ const money = (value: number, currency: string) => new Intl.NumberFormat("vi-VN"
 const moneyOrDash = (value: number | undefined, currency: string) => value === undefined ? "—" : money(value, currency);
 const dateLabel = (value: string) => new Intl.DateTimeFormat("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" }).format(new Date(`${value}T00:00:00Z`));
 
-function RateDetail({ detail, close, onBook }: { detail: RateDetailDto; close: () => void; onBook: () => void }) {
-  return <aside className="booking-summary detail-panel" aria-labelledby="detail-title"><div className="summary-head"><div><p>Giá và chính sách đặt phòng</p><h2 id="detail-title">Chi tiết giá net</h2></div><button type="button" onClick={close} aria-label="Đóng chi tiết"><X size={19} /></button></div><dl><div><dt>Hạng phòng</dt><dd>{detail.roomTypeName}</dd></div><div><dt>Rate plan</dt><dd>{detail.ratePlanName}</dd></div><div><dt>Còn lại</dt><dd>{detail.quantity} phòng</dd></div><div><dt>Thuế</dt><dd>{moneyOrDash(detail.tax, detail.currency)}</dd></div><div className="summary-total"><dt>Tổng giá net</dt><dd>{money(detail.total, detail.currency)}</dd></div></dl>{detail.tax === undefined ? <p className="summary-note">CloudHMS không trả dữ liệu thuế cho hạng phòng này.</p> : null}<h3>Giá từng ngày</h3><ul className="daily-rates">{detail.dailyRates.map((rate) => <li key={rate.date}><span>{dateLabel(rate.date)}</span><strong>{money(rate.amount, detail.currency)}</strong></li>)}</ul><h3>Chính sách</h3><ul className="policy-list">{detail.policies.map((policy) => <li key={`${policy.type}-${policy.description}`}><strong>{policy.type}</strong><span>{policy.description}</span></li>)}</ul><button type="button" className="continue-button" onClick={onBook}>Tiếp tục đặt phòng</button><p className="summary-note"><ShieldCheck size={15} /> Giá được kiểm tra lại khi tạo đặt phòng.</p></aside>;
+function RateDetail({ detail, close, onBook, canBook, bookLabel }: { detail: RateDetailDto; close: () => void; onBook: () => void; canBook: boolean; bookLabel: string }) {
+  return <aside className="booking-summary detail-panel" aria-labelledby="detail-title"><div className="summary-head"><div><p>Giá và chính sách đặt phòng</p><h2 id="detail-title">Chi tiết giá net</h2></div><button type="button" onClick={close} aria-label="Đóng chi tiết"><X size={19} /></button></div><dl><div><dt>Hạng phòng</dt><dd>{detail.roomTypeName}</dd></div><div><dt>Rate plan</dt><dd>{detail.ratePlanName}</dd></div><div><dt>Còn lại</dt><dd>{detail.quantity} phòng</dd></div><div><dt>Thuế</dt><dd>{moneyOrDash(detail.tax, detail.currency)}</dd></div><div className="summary-total"><dt>Giá net / phòng / kỳ</dt><dd>{money(detail.total, detail.currency)}</dd></div></dl>{detail.tax === undefined ? <p className="summary-note">CloudHMS không trả dữ liệu thuế cho hạng phòng này.</p> : null}<h3>Giá từng ngày</h3><ul className="daily-rates">{detail.dailyRates.map((rate) => <li key={rate.date}><span>{dateLabel(rate.date)}</span><strong>{money(rate.amount, detail.currency)}</strong></li>)}</ul><h3>Chính sách</h3><ul className="policy-list">{detail.policies.map((policy) => <li key={`${policy.type}-${policy.description}`}><strong>{policy.type}</strong><span>{policy.description}</span></li>)}</ul><button type="button" className="continue-button" disabled={!canBook} onClick={onBook}>{bookLabel}</button><p className="summary-note"><ShieldCheck size={15} /> Giá được kiểm tra lại khi tạo đặt phòng.</p></aside>;
 }
 
 // Combobox tự dựng thay cho `<datalist>`: trình duyệt tự lọc option của datalist theo chuỗi
@@ -114,8 +115,8 @@ function DestinationField({ value, suggestions, failed, onChange, onSelect }: {
   </div>;
 }
 
-function SearchView({ onBook }: { onBook: (selection: BookingSelection) => void }) {
-  const [form, setForm] = useState(createInitialSearch); const [suggestions, setSuggestions] = useState<PropertyDto[]>([]); const [suggestFailed, setSuggestFailed] = useState(false); const [hotels, setHotels] = useState<HotelAvailabilityDto[] | null>(null); const [rooms, setRooms] = useState<RoomAvailabilityDto[]>([]); const [selectedHotel, setSelectedHotel] = useState<string>(); const [detail, setDetail] = useState<RateDetailDto>(); const [busy, setBusy] = useState<"hotels" | "rooms" | "detail">(); const [error, setError] = useState(""); const [outcome, setOutcome] = useState<SearchOutcome>();
+function SearchView({ onBook, journeyContext, draftLegs, onOpenDraft }: { onBook: (selection: BookingSelection) => void; journeyContext?: { id: string; leg: number }; draftLegs: BookingSelection[]; onOpenDraft: (selection: BookingSelection) => void }) {
+  const [form, setForm] = useState(createInitialSearch); const [suggestions, setSuggestions] = useState<PropertyDto[]>([]); const [suggestFailed, setSuggestFailed] = useState(false); const [hotels, setHotels] = useState<HotelAvailabilityDto[] | null>(null); const [rooms, setRooms] = useState<RoomAvailabilityDto[]>([]); const [selectedHotel, setSelectedHotel] = useState<string>(); const [detail, setDetail] = useState<RateDetailDto>(); const [chosen, setChosen] = useState<{ detail: RateDetailDto; quantity: number }[]>([]); const [busy, setBusy] = useState<"hotels" | "rooms" | "detail">(); const [error, setError] = useState(""); const [outcome, setOutcome] = useState<SearchOutcome>();
   const generation = useRef(0);
   const arrivalRef = useRef<HTMLInputElement>(null);
   const submittedSearch = useRef<SearchRequest | undefined>(undefined);
@@ -135,8 +136,8 @@ function SearchView({ onBook }: { onBook: (selection: BookingSelection) => void 
   const searchHotels = async () => {
     const version = ++generation.current;
     const search = request();
-    setBusy("hotels"); setError(""); setOutcome(undefined); setHotels(null); setRooms([]); setDetail(undefined); setSelectedHotel(undefined);
-    try { const result = await bedbankApi.hotels(search); if (version === generation.current) { submittedSearch.current = search; setHotels(result); } }
+    setBusy("hotels"); setError(""); setOutcome(undefined); setHotels(null); setRooms([]); setDetail(undefined); setChosen([]); setSelectedHotel(undefined);
+    try { const result = await bedbankApi.hotels({ ...search, rooms: [search.rooms[0]!] }); if (version === generation.current) { submittedSearch.current = search; setHotels(result); } }
     catch (reason) {
       if (version !== generation.current) return;
       if (reason instanceof ApiError && reason.code === "PROPERTY_NOT_FOUND") setOutcome({ code: reason.code, message: reason.message });
@@ -149,15 +150,44 @@ function SearchView({ onBook }: { onBook: (selection: BookingSelection) => void 
     const search = submittedSearch.current;
     if (!search) return;
     const version = ++generation.current;
-    setBusy("rooms"); setError(""); setRooms([]); setSelectedHotel(propertyId); setDetail(undefined);
-    try { const result = await bedbankApi.rooms({ ...search, propertyId }); if (version === generation.current) setRooms(result); }
+    setBusy("rooms"); setError(""); setRooms([]); setSelectedHotel(propertyId); setDetail(undefined); setChosen([]);
+    try { const result = await bedbankApi.rooms({ ...search, rooms: [search.rooms[0]!], propertyId }); if (version === generation.current) setRooms(result); }
     catch (reason) { if (version === generation.current) setError(reason instanceof Error ? reason.message : "Không thể tải hạng phòng"); }
     finally { if (version === generation.current) setBusy(undefined); }
   };
   const startBooking = (rate: RateDetailDto) => {
     const search = submittedSearch.current;
     if (!search) return;
-    onBook({ requestId: crypto.randomUUID(), search, detail: rate, propertyName: hotels?.find((hotel) => hotel.id === rate.propertyId)?.name ?? search.destination });
+    onBook({ requestId: crypto.randomUUID(), search, detail: rate, items: [{ detail: rate, quantity: search.rooms.length }], propertyName: hotels?.find((hotel) => hotel.id === rate.propertyId)?.name ?? search.destination });
+  };
+  const chosenCount = chosen.reduce((sum, item) => sum + item.quantity, 0);
+  const chooseRate = async (room: RoomAvailabilityDto) => {
+    const search = submittedSearch.current;
+    if (!search) return;
+    const index = chosen.findIndex((item) => item.detail.roomTypeId === room.roomTypeId && item.detail.ratePlanId === room.ratePlanId);
+    if (index >= 0) { setChosen((current) => current.filter((_, position) => position !== index)); return; }
+    if (chosenCount >= search.rooms.length) return;
+    const version = ++generation.current;
+    setBusy("detail"); setError("");
+    try {
+      const result = await bedbankApi.detail({ ...search, rooms: [search.rooms[0]!], propertyId: room.propertyId, roomTypeId: room.roomTypeId, ratePlanId: room.ratePlanId });
+      if (version === generation.current) {
+        if (chosen.length > 0 && result.currency !== chosen[0]!.detail.currency) setError("Không thể gộp các hạng phòng khác loại tiền tệ trong cùng booking.");
+        else setChosen((current) => [...current, { detail: result, quantity: 1 }]);
+      }
+    } catch (reason) { if (version === generation.current) setError(reason instanceof Error ? reason.message : "Không thể tải chi tiết giá"); }
+    finally { if (version === generation.current) setBusy(undefined); }
+  };
+  const updateChosenQuantity = (room: RoomAvailabilityDto, quantity: number) => {
+    const other = chosenCount - (chosen.find((item) => item.detail.roomTypeId === room.roomTypeId && item.detail.ratePlanId === room.ratePlanId)?.quantity ?? 0);
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > room.quantity || quantity + other > form.roomCount) return;
+    setChosen((current) => current.map((item) => item.detail.roomTypeId === room.roomTypeId && item.detail.ratePlanId === room.ratePlanId ? { ...item, quantity } : item));
+  };
+  const continueChosen = () => {
+    const search = submittedSearch.current;
+    if (!search || chosenCount !== search.rooms.length || !chosen.length) return;
+    const first = chosen[0]!.detail;
+    onBook({ requestId: crypto.randomUUID(), search, detail: first, items: chosen, propertyName: hotels?.find((hotel) => hotel.id === first.propertyId)?.name ?? search.destination });
   };
   const loadDetail = async (room: RoomAvailabilityDto, book = false) => {
     const search = submittedSearch.current;
@@ -172,20 +202,20 @@ function SearchView({ onBook }: { onBook: (selection: BookingSelection) => void 
   };
   const update = (key: keyof SearchState, value: string | number) => {
     generation.current += 1; submittedSearch.current = undefined;
-    setBusy(undefined); setHotels(null); setRooms([]); setDetail(undefined); setSelectedHotel(undefined); setError(""); setOutcome(undefined);
+    setBusy(undefined); setHotels(null); setRooms([]); setDetail(undefined); setChosen([]); setSelectedHotel(undefined); setError(""); setOutcome(undefined);
     setForm((current) => ({ ...current, [key]: value }));
   };
-  return <><section className="search-shell reveal" aria-labelledby="search-title"><div className="search-intro"><div><p className="staff-context"><span /> Dành cho nhân viên NT Travel</p><h1 id="search-title">Tìm kỳ nghỉ xứng tầm.</h1></div><p className="search-lede">Tồn phòng, giá net và chính sách lấy từ CloudHMS trên cùng một màn hình.</p></div><form className="search-form" onSubmit={(event) => { event.preventDefault(); void searchHotels(); }}>
+  return <><section className="search-shell reveal" aria-labelledby="search-title">{draftLegs.length > 0 ? <div className="journey-banner"><strong>Chặng đang lưu nháp</strong>{draftLegs.map((leg) => <button key={leg.requestId} type="button" onClick={() => onOpenDraft(leg)}>Mở chặng {leg.journeyLeg} · {leg.propertyName}</button>)}</div> : null}{journeyContext ? <p className="journey-banner">Đang thêm chặng {journeyContext.leg} · Mã hành trình NT-J-{journeyContext.id}</p> : null}<div className="search-intro"><div><p className="staff-context"><span /> Dành cho nhân viên NT Travel</p><h1 id="search-title">Tìm kỳ nghỉ xứng tầm.</h1></div><p className="search-lede">Tồn phòng, giá net và chính sách lấy từ CloudHMS trên cùng một màn hình.</p></div><form className="search-form" onSubmit={(event) => { event.preventDefault(); void searchHotels(); }}>
     <DestinationField value={form.destination} suggestions={suggestions} failed={suggestFailed} onChange={(value) => update("destination", value)} onSelect={(property) => update("destination", property.name)} />
     <div className="field"><label htmlFor="arrival">Nhận phòng</label><div className="field-control"><CalendarDays size={18} /><input id="arrival" ref={arrivalRef} aria-label="Ngày nhận phòng" type="date" required value={form.arrivalDate} onChange={(event) => update("arrivalDate", event.target.value)} /></div></div>
     <div className="field"><label htmlFor="departure">Trả phòng</label><div className="field-control"><CalendarDays size={18} /><input id="departure" aria-label="Ngày trả phòng" type="date" required min={form.arrivalDate} value={form.departureDate} onChange={(event) => update("departureDate", event.target.value)} /></div></div>
     <div className="field"><label htmlFor="adults">Người lớn / phòng</label><div className="field-control"><UsersRound size={18} /><input id="adults" aria-label="Người lớn mỗi phòng" type="number" min={1} max={8} value={form.adults} onChange={(event) => update("adults", Number(event.target.value))} /></div></div>
     <div className="field"><label htmlFor="children">Trẻ em / phòng</label><div className="field-control"><UsersRound size={18} /><input id="children" aria-label="Trẻ em mỗi phòng" type="number" min={0} max={6} value={form.children} onChange={(event) => update("children", Number(event.target.value))} /></div></div>
     <div className="field"><label htmlFor="infants">Em bé / phòng</label><div className="field-control"><UsersRound size={18} /><input id="infants" aria-label="Em bé mỗi phòng" type="number" min={0} max={4} value={form.infants} onChange={(event) => update("infants", Number(event.target.value))} /></div></div>
-    <div className="field"><label htmlFor="rooms">Số phòng</label><div className="field-control"><BedDouble size={18} /><input id="rooms" aria-label="Số phòng" type="number" min={1} max={8} value={form.roomCount} onChange={(event) => update("roomCount", Number(event.target.value))} /></div></div>
+    <div className="field"><label htmlFor="rooms">Số phòng</label><div className="field-control"><BedDouble size={18} /><input id="rooms" aria-label="Số phòng" type="number" min={1} max={MAX_BOOKING_ROOMS} value={form.roomCount} onChange={(event) => update("roomCount", Number(event.target.value))} /></div></div>
     <button className="search-button" type="submit" disabled={Boolean(busy)}><Search size={19} />{busy === "hotels" ? "Đang tìm…" : "Tìm khách sạn"}</button>
   </form><div className="search-meta"><span><ShieldCheck size={16} /> Giá net, không markup</span><span><Check size={16} /> Availability gọi trực tiếp</span></div></section><main className="content-grid" id="main-content">
-    <section className="results" aria-live="polite">{error ? <ErrorMessage error={error} retry={() => void searchHotels()} /> : null}{busy && busy !== "hotels" ? <div className="loading-state">Đang tải dữ liệu CloudHMS…</div> : null}{hotels === null && !busy && !outcome && !error ? <div className="empty-state"><div className="empty-art"><Hotel size={34} /></div><h2>Bắt đầu từ một điểm đến.</h2><p>Tìm theo thành phố hoặc tên khách sạn để xem phòng, rate plan và giá net.</p></div> : null}{outcome?.code === "PROPERTY_NOT_FOUND" ? <div className="empty-state"><div className="empty-art"><Hotel size={34} /></div><h2>Không tìm thấy khách sạn nào.</h2><p>{outcome.message}</p><p>Thử tên ngắn hơn hoặc bỏ bớt từ, ví dụ “vinpearl hue” thay cho tên đầy đủ.</p></div> : null}{outcome?.code === "NO_AVAILABILITY" ? <div className="empty-state"><h2>Không còn phòng cho ngày đã chọn.</h2><p>{outcome.message}</p>{outcome.properties.length > 0 ? <ul className="matched-properties" aria-label="Khách sạn khớp tên">{outcome.properties.map((property) => <li key={property.id}><strong>{property.name}</strong>{property.city ? <span>{property.city}</span> : null}</li>)}</ul> : null}<button type="button" className="select-room" onClick={() => arrivalRef.current?.focus()}>Đổi ngày</button></div> : null}{hotels?.length === 0 ? <div className="empty-state"><h2>Không còn phòng phù hợp.</h2><p>Thử đổi ngày lưu trú, số khách hoặc điểm đến.</p></div> : null}{hotels && hotels.length > 0 ? <><div className="results-heading"><div><h2>{hotels.length} khách sạn còn phòng</h2><p>{form.destination} · {form.arrivalDate} → {form.departureDate}</p></div></div><div className="hotel-list">{hotels.map((hotel) => <article className="hotel-card" key={hotel.id}>{hotel.imageUrl ? <figure className="hotel-image"><img src={hotel.imageUrl} alt={`Không gian tại ${hotel.name}`} /></figure> : null}<div className="hotel-main"><div className="hotel-heading"><div><p>{hotel.city}</p><h3>{hotel.name}</h3></div><span className="availability-badge">Còn {hotel.quantity}</span></div><div className="hotel-rate"><span>Từ</span><strong>{money(hotel.fromPrice, hotel.currency)}</strong></div><button className="select-room" type="button" disabled={Boolean(busy)} onClick={() => void searchRooms(hotel.id)} aria-label={`Xem phòng tại ${hotel.name}`}>Xem hạng phòng</button>{selectedHotel === hotel.id && !busy && rooms.length === 0 ? <p className="inline-empty" role="status">Khách sạn này chưa có hạng phòng khả dụng cho tiêu chí đã chọn.</p> : null}{selectedHotel === hotel.id && rooms.length > 0 ? <div className="room-options">{rooms.map((room) => <article className="room-option" key={`${room.roomTypeId}-${room.ratePlanId}`}><div><h4>{room.roomTypeName}</h4><p>{room.ratePlanName} · Còn {room.quantity} phòng{room.maxOccupancy ? ` · Tối đa ${room.maxOccupancy} khách` : ""}</p></div><div className="rate-block"><small>Net toàn kỳ</small><strong>{money(room.total, room.currency)}</strong><span>{room.tax === undefined ? "Thuế: chưa có dữ liệu" : `Thuế ${money(room.tax, room.currency)}`}</span></div><div className="room-actions"><button type="button" disabled={Boolean(busy)} onClick={() => void loadDetail(room)} aria-label={`Xem giá chi tiết ${room.roomTypeName}`}>Xem giá & chính sách</button><button type="button" className="select-room" disabled={Boolean(busy) || room.quantity < form.roomCount} onClick={() => void loadDetail(room, true)} aria-label={`Đặt phòng ${room.roomTypeName}`}>Đặt phòng</button></div></article>)}</div> : null}</div></article>)}</div></> : null}</section>{detail ? <RateDetail detail={detail} close={() => setDetail(undefined)} onBook={() => startBooking(detail)} /> : null}
+    <section className="results" aria-live="polite">{error ? <ErrorMessage error={error} retry={() => void searchHotels()} /> : null}{busy && busy !== "hotels" ? <div className="loading-state">Đang tải dữ liệu CloudHMS…</div> : null}{hotels === null && !busy && !outcome && !error ? <div className="empty-state"><div className="empty-art"><Hotel size={34} /></div><h2>Bắt đầu từ một điểm đến.</h2><p>Tìm theo thành phố hoặc tên khách sạn để xem phòng, rate plan và giá net.</p></div> : null}{outcome?.code === "PROPERTY_NOT_FOUND" ? <div className="empty-state"><div className="empty-art"><Hotel size={34} /></div><h2>Không tìm thấy khách sạn nào.</h2><p>{outcome.message}</p><p>Thử tên ngắn hơn hoặc bỏ bớt từ, ví dụ “vinpearl hue” thay cho tên đầy đủ.</p></div> : null}{outcome?.code === "NO_AVAILABILITY" ? <div className="empty-state"><h2>Không còn phòng cho ngày đã chọn.</h2><p>{outcome.message}</p>{outcome.properties.length > 0 ? <ul className="matched-properties" aria-label="Khách sạn khớp tên">{outcome.properties.map((property) => <li key={property.id}><strong>{property.name}</strong>{property.city ? <span>{property.city}</span> : null}</li>)}</ul> : null}<button type="button" className="select-room" onClick={() => arrivalRef.current?.focus()}>Đổi ngày</button></div> : null}{hotels?.length === 0 ? <div className="empty-state"><h2>Không còn phòng phù hợp.</h2><p>Thử đổi ngày lưu trú, số khách hoặc điểm đến.</p></div> : null}{hotels && hotels.length > 0 ? <><div className="results-heading"><div><h2>{hotels.length} khách sạn còn phòng</h2><p>{form.destination} · {form.arrivalDate} → {form.departureDate}</p></div></div><div className="hotel-list">{hotels.map((hotel) => <article className="hotel-card" key={hotel.id}>{hotel.imageUrl ? <figure className="hotel-image"><img src={hotel.imageUrl} alt={`Không gian tại ${hotel.name}`} /></figure> : null}<div className="hotel-main"><div className="hotel-heading"><div><p>{hotel.city}</p><h3>{hotel.name}</h3></div><span className="availability-badge">Tồn theo hạng phòng</span></div><div className="hotel-rate"><span>Từ / phòng / kỳ</span><strong>{money(hotel.fromPrice, hotel.currency)}</strong></div><button className="select-room" type="button" disabled={Boolean(busy)} onClick={() => void searchRooms(hotel.id)} aria-label={`Xem phòng tại ${hotel.name}`}>Xem hạng phòng</button>{selectedHotel === hotel.id && !busy && rooms.length === 0 ? <p className="inline-empty" role="status">Khách sạn này chưa có hạng phòng khả dụng cho tiêu chí đã chọn.</p> : null}{selectedHotel === hotel.id && rooms.length > 0 ? <div className="room-options">{rooms.map((room) => <article className="room-option" key={`${room.roomTypeId}-${room.ratePlanId}`}><div><h4>{room.roomTypeName}</h4><p>{room.ratePlanName} · Còn {room.quantity} phòng{room.maxOccupancy ? ` · Tối đa ${room.maxOccupancy} khách` : ""}</p></div><div className="rate-block"><small>Giá net / phòng / kỳ</small><strong>{money(room.total, room.currency)}</strong><span>{room.tax === undefined ? "Thuế: chưa có dữ liệu" : `Thuế ${money(room.tax, room.currency)}`}</span></div><div className="room-actions"><button type="button" disabled={Boolean(busy)} onClick={() => void loadDetail(room)} aria-label={`Xem giá chi tiết ${room.roomTypeName}`}>Xem giá & chính sách</button><button type="button" disabled={Boolean(busy) || (chosenCount >= form.roomCount && !chosen.some((item) => item.detail.roomTypeId === room.roomTypeId && item.detail.ratePlanId === room.ratePlanId))} onClick={() => void chooseRate(room)} aria-label={`${chosen.some((item) => item.detail.roomTypeId === room.roomTypeId && item.detail.ratePlanId === room.ratePlanId) ? "Bỏ chọn" : "Chọn"} ${room.roomTypeName}`}>{chosen.some((item) => item.detail.roomTypeId === room.roomTypeId && item.detail.ratePlanId === room.ratePlanId) ? "Bỏ chọn" : "Chọn hạng phòng"}</button>{chosen.some((item) => item.detail.roomTypeId === room.roomTypeId && item.detail.ratePlanId === room.ratePlanId) ? <label>Số phòng {room.roomTypeName}<input type="number" min={1} max={Math.min(room.quantity, form.roomCount)} value={chosen.find((item) => item.detail.roomTypeId === room.roomTypeId && item.detail.ratePlanId === room.ratePlanId)!.quantity} onChange={(event) => updateChosenQuantity(room, Number(event.target.value))} /></label> : null}{chosen.length === 0 ? <button type="button" className="select-room" disabled={Boolean(busy) || room.quantity < form.roomCount} onClick={() => void loadDetail(room, true)} aria-label={`Đặt phòng ${room.roomTypeName}`}>Đặt phòng</button> : null}</div></article>)}</div> : null}{selectedHotel === hotel.id && chosen.length > 0 ? <div className="multi-room-summary"><h4>Hạng phòng đã chọn · {chosenCount}/{form.roomCount} phòng</h4><ul>{chosen.map((item) => <li key={`${item.detail.roomTypeId}-${item.detail.ratePlanId}`}>{item.detail.roomTypeName} · {item.quantity} × {money(item.detail.total, item.detail.currency)}/phòng = {money(item.quantity * item.detail.total, item.detail.currency)}</li>)}</ul><p>Tổng giá net: <strong>{money(chosen.reduce((sum, item) => sum + item.detail.total * item.quantity, 0), chosen[0]!.detail.currency)}</strong></p><button type="button" className="select-room" disabled={Boolean(busy) || chosenCount !== form.roomCount} onClick={continueChosen}>Tiếp tục với {form.roomCount} phòng</button></div> : null}</div></article>)}</div></> : null}</section>{detail ? <RateDetail detail={detail} close={() => setDetail(undefined)} canBook={chosen.length === 0 || chosenCount === form.roomCount} bookLabel={chosen.length > 0 && chosenCount !== form.roomCount ? "Chọn đủ số phòng để tiếp tục" : "Tiếp tục đặt phòng"} onBook={() => chosen.length > 0 ? continueChosen() : startBooking(detail)} /> : null}
   </main></>;
 }
 
@@ -201,19 +231,63 @@ function UsersView() {
 
 export default function App() {
   const [selection, setSelection] = useState<BookingSelection>(); const [booking, setBooking] = useState<BookingDto>();
+  const [journeyContext, setJourneyContext] = useState<{ id: string; leg: number }>();
+  const [draftLegs, setDraftLegs] = useState<BookingSelection[]>([]);
+  const [draftFields, setDraftFields] = useState<Record<string, BookingDraftFields>>({});
+  const [draftsReadyFor, setDraftsReadyFor] = useState<string>();
   const [profile, setProfile] = useState<Profile | null>(); const [view, setView] = useState<View>("search"); const [sessionError, setSessionError] = useState("");
   const currentUserId = useRef<string | undefined>(undefined);
   currentUserId.current = profile?.userId;
   // 401 nghĩa là chưa đăng nhập; mọi lỗi khác là sự cố hệ thống và phải nói rõ, nếu không
   // nhân viên sẽ nhập lại mật khẩu đúng nhiều lần mà không hiểu vì sao vẫn hỏng.
   useEffect(() => { bedbankApi.me().then(setProfile).catch((error) => { if (!(error instanceof ApiError) || error.status !== 401) setSessionError(error instanceof Error ? error.message : "Không thể kiểm tra phiên đăng nhập"); setProfile(null); }); }, []);
+  useEffect(() => {
+    if (!profile?.userId) return;
+    try {
+      const saved = JSON.parse(localStorage.getItem(`nt-journey-drafts:${profile.userId}`) ?? "{}") as { legs?: BookingSelection[]; fields?: Record<string, BookingDraftFields> };
+      setDraftLegs(Array.isArray(saved.legs) ? saved.legs : []);
+      setDraftFields(saved.fields && typeof saved.fields === "object" ? saved.fields : {});
+    } catch { setDraftLegs([]); setDraftFields({}); }
+    setDraftsReadyFor(profile.userId);
+  }, [profile?.userId]);
+  useEffect(() => {
+    if (!profile?.userId || draftsReadyFor !== profile.userId) return;
+    try { localStorage.setItem(`nt-journey-drafts:${profile.userId}`, JSON.stringify({ legs: draftLegs, fields: draftFields })); } catch { /* Booking vẫn dùng được trong phiên hiện tại. */ }
+  }, [profile?.userId, draftsReadyFor, draftLegs, draftFields]);
   if (profile === undefined) return <main className="auth-page"><div className="loading-state" role="status">Đang kiểm tra phiên đăng nhập…</div></main>;
   if (profile === null) return <Login onLogin={setProfile} notice={sessionError} />;
   if (profile.mustChangePassword) return <ChangePassword profile={profile} onDone={setProfile} />;
-  const logout = async () => { try { await bedbankApi.logout(); } finally { setProfile(null); setSelection(undefined); setBooking(undefined); setView("search"); } };
-  return <div className="app-shell"><a className="skip-link" href="#main-content">Bỏ qua điều hướng</a><Header profile={profile} view={view} onView={setView} onLogout={() => void logout()} />{view === "search" ? <SearchView onBook={(value) => { setSelection(value); setView("checkout"); }} /> : null}
+  const logout = async () => { try { await bedbankApi.logout(); } finally { try { localStorage.removeItem(`nt-journey-drafts:${profile.userId}`); } catch { /* Bộ nhớ trình duyệt có thể bị khóa. */ } setProfile(null); setSelection(undefined); setBooking(undefined); setJourneyContext(undefined); setDraftLegs([]); setDraftFields({}); setDraftsReadyFor(undefined); setView("search"); } };
+  const addLeg = async (id: string, currentLeg: number) => {
+    const booked = await bedbankApi.journeyBookings(id);
+    const nextLeg = Math.max(currentLeg, ...booked.map((item) => item.request.journeyLeg ?? 1), ...draftLegs.filter((leg) => leg.journeyId === id).map((leg) => leg.journeyLeg ?? 1)) + 1;
+    if (nextLeg > 20) throw new Error("Hành trình đã đạt tối đa 20 chặng.");
+    setJourneyContext({ id, leg: nextLeg });
+    setView("search");
+  };
+  const beginBooking = (value: BookingSelection) => {
+    const next = { ...value, journeyId: journeyContext?.id ?? value.requestId, journeyLeg: journeyContext?.leg ?? 1 };
+    const replaced = draftLegs.find((leg) => leg.journeyId === next.journeyId && leg.journeyLeg === next.journeyLeg);
+    if (replaced) setDraftFields((current) => { const updated = { ...current }; delete updated[replaced.requestId]; return updated; });
+    setDraftLegs((current) => [...current.filter((leg) => leg.journeyId !== next.journeyId || leg.journeyLeg !== next.journeyLeg), next].sort((a, b) => (a.journeyLeg ?? 1) - (b.journeyLeg ?? 1)));
+    setSelection(next);
+    setJourneyContext(undefined);
+    setView("checkout");
+  };
+  return <div className="app-shell"><a className="skip-link" href="#main-content">Bỏ qua điều hướng</a><Header profile={profile} view={view} onView={(next) => { if (next === "search") setJourneyContext(undefined); setView(next); }} onLogout={() => void logout()} />{view === "search" ? <SearchView journeyContext={journeyContext} onBook={beginBooking} draftLegs={draftLegs} onOpenDraft={(leg) => { setSelection(leg); setView("checkout"); }} /> : null}
     {view === "users" && profile.role === "admin" ? <UsersView /> : null}
-    {view === "checkout" && selection ? <BookingCheckout key={selection.requestId} selection={selection} onBack={() => setView("search")} onCreated={(value) => { if (currentUserId.current !== profile.userId) return; setBooking(value); setSelection(undefined); setView("booking"); }} /> : null}
-    {view === "booking" && booking ? <BookingDetails key={booking.id} initial={booking} onBack={() => setView("bookings")} /> : null}
-    {view === "bookings" ? <BookingsList onSearch={() => setView("search")} onSelect={(value) => { setBooking(value); setView("booking"); }} /> : null}<footer className="foot-line"><span>NT Travel Bedbank</span><span>Tìm phòng & đặt phòng · CiHMS</span><span>Hỗ trợ vận hành</span></footer></div>;
+    {view === "checkout" && selection ? <BookingCheckout key={selection.requestId} selection={selection}
+      draftLegs={draftLegs.filter((leg) => leg.journeyId === selection.journeyId)} onSelectDraft={setSelection}
+      initialDraft={draftFields[selection.requestId]} onDraftChange={(draft) => setDraftFields((current) => ({ ...current, [selection.requestId]: draft }))}
+      onAddLeg={() => addLeg(selection.journeyId!, selection.journeyLeg ?? 1)}
+      onBack={() => { setJourneyContext({ id: selection.journeyId!, leg: selection.journeyLeg! }); setView("search"); }}
+      onCreated={(value) => { if (currentUserId.current !== profile.userId) return;
+        setDraftLegs((current) => current.filter((leg) => leg.requestId !== value.id));
+        setDraftFields((current) => { const next = { ...current }; delete next[value.id]; return next; });
+        setBooking(value); setSelection(undefined); setView("booking"); }} /> : null}
+    {view === "booking" && booking ? <BookingDetails key={booking.id} initial={booking} onBack={() => setView("bookings")}
+      pendingLegs={draftLegs.filter((leg) => leg.journeyId === (booking.request.journeyId ?? booking.id))}
+      onOpenDraft={(leg) => { setSelection(leg); setView("checkout"); }}
+      onAddLeg={(value) => addLeg(value.request.journeyId ?? value.id, value.request.journeyLeg ?? 1)} onSelectLeg={setBooking} /> : null}
+    {view === "bookings" ? <BookingsList onSearch={() => { setJourneyContext(undefined); setView("search"); }} onSelect={(value) => { setBooking(value); setView("booking"); }} /> : null}<footer className="foot-line"><span>NT Travel Bedbank</span><span>Tìm phòng & đặt phòng · CiHMS</span><span>Hỗ trợ vận hành</span></footer></div>;
 }

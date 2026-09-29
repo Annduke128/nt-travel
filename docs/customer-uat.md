@@ -33,14 +33,18 @@ The internal tool authenticates staff, displays availability and rates, creates 
 | SEARCH-04 | Search a name that matches no hotel | `PROPERTY_NOT_FOUND` state asking to fix the name; no red retry alert |
 | SEARCH-05 | Search a matching name on dates with no rooms | `NO_AVAILABILITY` state listing the matched hotels; "Đổi ngày" moves focus to the arrival date |
 | SEARCH-06 | Pick a suggestion using only the keyboard (↓, Enter, Escape) | Listbox is reachable, active option is announced, Enter fills the field without submitting |
-| SEARCH-02 | Search one, two and multiple rooms with adult/child/infant occupancy | Request and returned availability match approved CloudHMS behavior |
+| SEARCH-02 | Search one, two and up to 20 rooms with adult/child/infant occupancy | Search lists per-room rates; booking rechecks requested quantities with approved CloudHMS behavior |
 | RATE-01 | Open hotel, room/rate and detail for at least three properties | Room/rate identifiers and remaining quantity match CloudHMS |
 | RATE-02 | Compare at least three stays/currencies | Total, average, tax and daily breakdown reconcile exactly |
 | POLICY-01 | Compare flexible and non-refundable plans | Cancellation/guarantee descriptions match CloudHMS |
 | EMPTY-01 | Search a known sold-out stay | Clear no-availability state; no stale rate detail |
 | ERROR-01 | Simulate CloudHMS timeout/rate limit | Safe retryable error; no secret or raw upstream body shown |
 | SECURITY-01 | Inspect authenticated API responses | `Cache-Control: private, no-store`; secure HttpOnly cookies; hardened headers |
-| BOOK-01 | Select a rate and complete guest details for each room | Exact dates/rate/room count; policies visible before creation |
+| BOOK-01 | Select one or several room categories, set quantity by category, and complete every guest's details | Per-room price, category subtotal and booking total agree; exact dates/rates/room count and policies visible before creation |
+| BOOK-09 | Select two rate plans sharing one allotment with insufficient shared inventory | Booking is rejected before the CiHMS create call |
+| BOOK-10 | Add a second stay before or after the first booking, then create each stay | Shared NT-J journey code; separate CiHMS booking IDs, status and guarantee review for each leg |
+| BOOK-11 | Start a stay, enter guest contacts and a special request, then reload | Unbooked stay and entered data reopen from the browser draft; signing out clears the draft |
+| BOOK-12 | Open leg 1 after leg 2 has been booked, then add another stay | New stay is leg 3; no duplicate leg number is created |
 | BOOK-02 | Create booking, then inspect before confirming | Prospect displayed as pending; no automatic commit or email |
 | BOOK-03 | Review guarantees and explicitly confirm | Every reservation becomes Reserved; confirmation numbers retained; CiHMS shows payment `No`, settled 0, a TravelAgent NT_TRAVEL profile and a BookingClient BookingPortal profile |
 | BOOK-04 | Change price, inventory, or guarantee between steps | Mutation is blocked until current conditions are reviewed |

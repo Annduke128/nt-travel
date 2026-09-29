@@ -31,6 +31,7 @@ export const bedbankApi = {
   rooms: (search: SearchRequest & { propertyId: string }) => post<RoomAvailabilityDto[]>("/api/availability/rooms", search),
   detail: (search: SearchRequest & { propertyId: string; roomTypeId: string; ratePlanId: string }) => post<RateDetailDto>("/api/availability/detail", search),
   bookings: () => api<BookingDto[]>("/api/bookings"),
+  journeyBookings: (id: string) => api<BookingDto[]>(`/api/journeys/${encodeURIComponent(id)}/bookings`),
   booking: (id: string) => api<BookingDto>(`/api/bookings/${encodeURIComponent(id)}`),
   createBooking: (input: BookingCreateRequest) => post<BookingDto>("/api/bookings", input),
   bookingGuarantees: (id: string) => api<BookingGuaranteesDto>(`/api/bookings/${encodeURIComponent(id)}/guarantees`),

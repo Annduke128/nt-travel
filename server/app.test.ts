@@ -50,9 +50,9 @@ describe("BFF", () => {
     const bedbank = new MockBedbankService();
     const bookings = new BookingService(new MockBookingGateway(bedbank), new MemoryBookingStore());
     const app = createApp({ ...deps, bedbank, bookings });
-    const input = { requestId: "22222222-2222-4222-8222-222222222222", destination: "Nha Trang", arrivalDate: "2099-06-01", departureDate: "2099-06-03",
+    const input = { requestId: "22222222-2222-4222-8222-222222222222", journeyId: "22222222-2222-4222-8222-222222222222", journeyLeg: 1, destination: "Nha Trang", arrivalDate: "2099-06-01", departureDate: "2099-06-03",
       rooms: [{ adults: 2, children: 0, infants: 0 }], propertyId: "mock-nha-trang", roomTypeId: "deluxe-ocean", ratePlanId: "breakfast-flex",
-      expectedTotal: 4900000, currency: "VND", guests: [{ firstName: "An", lastName: "Nguyen", email: "guest@example.com", phoneNumber: "0912345678" }], notes: "", acceptedPolicies: true };
+      expectedTotal: 4900000, currency: "VND", guests: [{ firstName: "An", lastName: "Nguyen", email: "guest@example.com", phoneNumber: "0912345678" }], roomGuests: [[{ firstName: "An", lastName: "Nguyen", email: "guest@example.com", phoneNumber: "0912345678" }, { firstName: "Binh", lastName: "Tran", email: "binh@example.com", phoneNumber: "0912345679" }]], notes: "", acceptedPolicies: true };
     const created = await request(app).post("/api/bookings").set("Cookie", "nt_access=access").send(input);
     expect(created.status).toBe(201);
     expect(created.body.data.status).toBe("created");
@@ -66,7 +66,9 @@ describe("BFF", () => {
     const list = await request(app).get("/api/bookings").set("Cookie", "nt_access=access");
     expect(list.body.data).toHaveLength(1);
     expect(list.body.data[0].status).toBe("confirmed");
+    expect((await request(app).get(`/api/journeys/${input.journeyId}/bookings`).set("Cookie", "nt_access=access")).body.data).toHaveLength(1);
     vi.mocked(deps.auth.authenticate).mockResolvedValue({ ...staff, userId: "other" });
+    expect((await request(app).get(`/api/journeys/${input.journeyId}/bookings`).set("Cookie", "nt_access=access")).body.data).toEqual([]);
     expect((await request(app).get(`/api/bookings/${input.requestId}`).set("Cookie", "nt_access=access")).status).toBe(404);
   });
 

@@ -1,8 +1,8 @@
-import type { BookingCreateRequest, BookingDto, BookingGuarantee, BookingGuaranteesDto, BookingReservation, Profile } from "../../shared/contracts.js";
+import type { BookingCreateRequest, BookingDto, BookingGuarantee, BookingGuaranteesDto, BookingReservation, BookingRoomLine, Profile } from "../../shared/contracts.js";
 import { createHash } from "node:crypto";
 import { AppError } from "../errors.js";
 import type { BookingRecord, BookingStore } from "./store.js";
-export type PreparedBooking = { propertyName: string; roomTypeName: string; ratePlanName: string; total: number; currency: string; body: unknown };
+export type PreparedBooking = { propertyName: string; roomTypeName: string; ratePlanName: string; total: number; currency: string; body: unknown; roomLines?: BookingRoomLine[] };
 export interface BookingGateway {
   mode: "mock" | "live";
   prepare(input: BookingCreateRequest, actor: Profile, reference: string): Promise<PreparedBooking>;
@@ -23,6 +23,7 @@ export class BookingService {
     return record;
   }
   async list(actor: Profile): Promise<BookingDto[]> { return this.store.list(actor.userId); }
+  async listJourney(actor: Profile, journeyId: string): Promise<BookingDto[]> { return this.store.listJourney(actor.userId, journeyId); }
   async get(actor: Profile, id: string): Promise<BookingDto> { return (await this.record(actor, id)).booking; }
 
   async create(actor: Profile, input: BookingCreateRequest): Promise<BookingDto> {
@@ -32,6 +33,9 @@ export class BookingService {
       if (existing.fingerprint !== fingerprint) throw conflict();
       return existing.booking;
     }
+    if (input.journeyId && (await this.store.listJourney(actor.userId, input.journeyId)).some((item) => (item.request.journeyLeg ?? 1) === input.journeyLeg)) {
+      throw new AppError(409, "BOOKING_CONFLICT", "Chặng này đã có đặt phòng trong hành trình. Vui lòng mở lại hành trình.");
+    }
     const reference = `NT-${input.requestId}`;
     const prepared = await this.gateway.prepare(input, actor, reference);
     if (prepared.total !== input.expectedTotal || prepared.currency !== input.currency) {
@@ -40,7 +44,7 @@ export class BookingService {
     const record: BookingRecord = { actorId: actor.userId, fingerprint, booking: {
       id: input.requestId, reference, request: input, createdAt: new Date().toISOString(), mode: this.gateway.mode,
       status: "creating", propertyName: prepared.propertyName, roomTypeName: prepared.roomTypeName,
-      ratePlanName: prepared.ratePlanName, total: prepared.total, currency: prepared.currency, reservations: [],
+      ratePlanName: prepared.ratePlanName, total: prepared.total, currency: prepared.currency, roomLines: prepared.roomLines, reservations: [],
     } };
     // The unique row is written BEFORE the mutation. Competing workers and retries cannot replay it.
     if (!await this.store.insert(record)) {

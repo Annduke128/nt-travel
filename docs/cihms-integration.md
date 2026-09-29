@@ -84,16 +84,16 @@ bao giờ lệch tập khớp. Quy tắc so khớp, đặt ra theo đúng dữ l
 - `POST /common-trd/v1/crs/booking/get-room-detail-availability`
 
 Occupancy là số khách **mỗi phòng**, không cộng dồn. Không dùng GUID toàn số 0 làm ID.
-Backend kiểm tra lại rate đúng cặp room/rate, đủ allotment cho số phòng, đủ ngày và giá trước khi tạo.
-Detail được lấy cho một phòng, tổng booking là giá một phòng × số phòng. Thiếu thuế được hiển thị là chưa có dữ liệu.
+UI tìm khách sạn và liệt kê hạng phòng theo giá/tồn của một phòng để có thể ghép nhiều hạng cho đoàn. Backend kiểm tra lại đúng từng cặp room/rate, allotment không bị tính trùng giữa các rate plan, đủ ngày và giá từng phòng trước khi tạo.
+Detail được lấy cho một phòng; tổng booking là tổng giá từng phòng đã chọn. Giá lẻ theo hạng hiện trước tổng. Thiếu thuế được hiển thị là chưa có dữ liệu.
 
 ## Step 4 — Create & Confirm a Booking
 
-1. `POST /api/bookings`: kiểm tra ngày, 1–8 phòng, tối đa 30 đêm, khách đại diện, đồng ý chính sách và giá dự kiến.
+1. `POST /api/bookings`: kiểm tra ngày, 1–20 phòng, tối đa 30 đêm, hạng/giá dự kiến từng phòng, đủ thông tin mọi khách, đồng ý chính sách. Một booking chỉ có một property và một khoảng ngày. Các chặng khác nhau có request ID riêng và cùng `journeyId`; ứng dụng hiển thị mã hành trình `NT-J-{journeyId}`.
 2. Lưu request ID và fingerprint vào `public.bookings` trước lệnh ghi. Live dùng Supabase với quyền BFF;
    cùng request ID chỉ được tạo một lần, kể cả khi các worker nhận request đồng thời.
 3. `POST /common-trd/v1/crs/booking`: `distributionChannel` (khác tên trường ở availability),
-   `requestorId`, `sourceCode`, `reservations[]` với Booker/TravelAgent/BookingClient (`BookingPortal`)/Guest, totalAmount, roomOccupancy,
+   `requestorId`, `sourceCode`, `reservations[]` với Booker/TravelAgent/BookingClient (`BookingPortal`)/các Guest trong phòng, totalAmount theo giá từng phòng, roomOccupancy,
    referenceIds và roomRates từng ngày lấy từ dữ liệu server.
 4. Đọc `data.reservations[].reservationID`, `confirmationNumber`, `status`. `Prospect` là chờ xác nhận.
 5. `POST /common-trd/v1/crs/booking/{id}/guarantee-methods`: hiển thị toàn bộ khoản theo ngày,
@@ -109,7 +109,7 @@ Detail được lấy cho một phòng, tổng booking là giá một phòng × 
 ## Step 5 — Update / Cancel / Search
 
 Đã triển khai `GET /api/bookings` và `GET /api/bookings/{id}` để xem lại trạng thái lưu tại NT Travel,
-giới hạn theo nhân viên đăng nhập. Danh sách là 100 yêu cầu gần nhất; tìm mã, khách sạn và tên khách trên danh sách đó.
+giới hạn theo nhân viên đăng nhập. Danh sách là 100 yêu cầu gần nhất; tìm mã, khách sạn và tên khách trên danh sách đó. `GET /api/journeys/:id/bookings` trả toàn bộ chặng đã lưu của một hành trình, không phụ thuộc giới hạn 100 của danh sách. Unique index `(actor_id, journeyId, journeyLeg)` ngăn tạo trùng số chặng khi hai phiên cùng thao tác.
 Đây là trạng thái lần cuối NT Travel nhận được; không tự đồng bộ thay đổi ngoài ứng dụng.
 
 Collection có các API dưới đây, **chưa triển khai trong giao diện/backend**:

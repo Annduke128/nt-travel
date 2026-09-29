@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, test } from "vitest";
-import { parseSearchRequest } from "./contracts.js";
+import { bookingCreateSchema, parseSearchRequest } from "./contracts.js";
 
 const validSearch = {
   destination: "Nha Trang",
@@ -30,6 +30,12 @@ describe("search contract", () => {
     expect(parseSearchRequest({ ...validSearch, rooms }).rooms).toHaveLength(2);
   });
 
+  test("supports a group of 20 rooms while rejecting larger requests", () => {
+    const rooms = Array.from({ length: 20 }, () => validSearch.rooms[0]!);
+    expect(parseSearchRequest({ ...validSearch, rooms }).rooms).toHaveLength(20);
+    expect(() => parseSearchRequest({ ...validSearch, rooms: [...rooms, validSearch.rooms[0]] })).toThrow();
+  });
+
   test("rejects rooms with different occupancy because CloudHMS takes one per request", () => {
     expect(() => parseSearchRequest({ ...validSearch, rooms: [{ adults: 2, children: 0, infants: 0 }, { adults: 1, children: 2, infants: 0 }] }))
       .toThrow("V1 chỉ hỗ trợ các phòng có cùng số khách");
@@ -38,5 +44,51 @@ describe("search contract", () => {
   test("rejects impossible calendar dates", () => {
     expect(() => parseSearchRequest({ ...validSearch, arrivalDate: "2026-02-30" }))
       .toThrow("Ngày nhận phòng không hợp lệ");
+  });
+});
+
+describe("mixed room booking contract", () => {
+  const guestA = { firstName: "An", lastName: "Nguyen", email: "an@example.com", phoneNumber: "0912345678" };
+  const guestB = { firstName: "Binh", lastName: "Tran", email: "binh@example.com", phoneNumber: "0912345679" };
+  const booking = {
+    ...validSearch, arrivalDate: "2099-08-10", departureDate: "2099-08-12",
+    rooms: [validSearch.rooms[0], validSearch.rooms[0]],
+    requestId: "22222222-2222-4222-8222-222222222222", propertyId: "hotel",
+    roomTypeId: "deluxe", ratePlanId: "breakfast", expectedTotal: 7000000, currency: "VND",
+    guests: [guestA, guestB], roomGuests: [[guestA, guestB], [guestB, guestA]],
+    roomSelections: [
+      { roomTypeId: "deluxe", ratePlanId: "breakfast", expectedUnitTotal: 4000000 },
+      { roomTypeId: "standard", ratePlanId: "room-only", expectedUnitTotal: 3000000 },
+    ],
+    notes: "", acceptedPolicies: true,
+  };
+
+  test("accepts one priced selection for each room", () => {
+    expect(bookingCreateSchema.parse(booking).roomSelections).toHaveLength(2);
+  });
+
+  test("rejects a selection count or total that differs from the rooms", () => {
+    expect(() => bookingCreateSchema.parse({ ...booking, roomSelections: booking.roomSelections.slice(0, 1) })).toThrow();
+    expect(() => bookingCreateSchema.parse({ ...booking, expectedTotal: 6000000 })).toThrow();
+  });
+
+  test("accepts a 20-room group with a rate and all guests assigned to each room", () => {
+    const rooms = Array.from({ length: 20 }, () => validSearch.rooms[0]!);
+    const guests = rooms.map((_, index) => ({ ...guestA, email: `lead${index}@example.com` }));
+    const roomGuests = guests.map((guest, index) => [guest, { ...guestB, email: `second${index}@example.com` }]);
+    const roomSelections = rooms.map((_, index) => index < 10 ? booking.roomSelections[0]! : booking.roomSelections[1]!);
+    const group = { ...booking, rooms, guests, roomGuests, roomSelections, expectedTotal: 70000000 };
+    expect(bookingCreateSchema.parse(group).roomGuests).toHaveLength(20);
+    expect(() => bookingCreateSchema.parse({ ...group, rooms: [...rooms, rooms[0]!] })).toThrow();
+  });
+
+  test("requires every searched guest and the lead to match the room contact", () => {
+    expect(() => bookingCreateSchema.parse({ ...booking, roomGuests: undefined })).toThrow();
+    const roomGuests = booking.rooms.map((room, index) => Array.from({ length: room.adults + room.children + room.infants }, (_, person) => person === 0 ? booking.guests[index]! : { firstName: "Guest", lastName: "Two", email: "two@example.com", phoneNumber: "0912345680" }));
+    expect(bookingCreateSchema.parse({ ...booking, roomGuests }).roomGuests).toHaveLength(2);
+    const sameLeadDifferentKeyOrder = { phoneNumber: booking.guests[0]!.phoneNumber, email: booking.guests[0]!.email, lastName: booking.guests[0]!.lastName, firstName: booking.guests[0]!.firstName };
+    expect(bookingCreateSchema.parse({ ...booking, roomGuests: [[sameLeadDifferentKeyOrder, roomGuests[0]![1]!], roomGuests[1]!] }).roomGuests).toHaveLength(2);
+    expect(() => bookingCreateSchema.parse({ ...booking, roomGuests: [roomGuests[0]!.slice(0, 1), roomGuests[1]!] })).toThrow();
+    expect(() => bookingCreateSchema.parse({ ...booking, roomGuests: [[{ ...roomGuests[0]![0]!, firstName: "Other" }, roomGuests[0]![1]!], roomGuests[1]!] })).toThrow();
   });
 });

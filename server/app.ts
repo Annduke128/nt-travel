@@ -216,6 +216,7 @@ export function createApp({
     return bookings;
   };
   app.get("/api/bookings", requireAuth, requireReady, asyncRoute(async (request, response) => response.json({ data: await bookingService().list(request.profile!) })));
+  app.get("/api/journeys/:id/bookings", requireAuth, requireReady, asyncRoute(async (request, response) => response.json({ data: await bookingService().listJourney(request.profile!, z.uuid().parse(routeId(request))) })));
   app.post("/api/bookings", requireAuth, requireReady, rateLimit(20, 60_000, rateLimitMaxKeys), asyncRoute(async (request, response) => {
     const input = bookingCreateSchema.parse(request.body);
     response.status(201).json({ data: await bookingService().create(request.profile!, input) });

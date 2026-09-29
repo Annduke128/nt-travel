@@ -2,11 +2,11 @@
 
 Ứng dụng nội bộ để nhân viên NT Travel tìm phòng, xem giá net và chính sách, tạo và xác nhận đặt phòng qua CiHMS.
 
-Luồng đặt phòng: **Tìm phòng → Xem hạng phòng → Đặt phòng → Nhập khách → Tạo đặt phòng → Đọc điều kiện bảo đảm → Xác nhận đặt phòng**.
+Luồng đặt phòng: **Tìm phòng → Chọn một hoặc nhiều hạng phòng và số lượng → Thêm chặng lưu trú nếu cần → Nhập mọi khách → Tạo booking cho từng chặng → Đọc điều kiện bảo đảm → Xác nhận booking**.
 Mục **Đặt phòng của tôi** hiển thị 100 yêu cầu gần nhất do nhân viên đang đăng nhập tạo qua ứng dụng, có tìm theo mã, khách sạn và khách.
-Mỗi phòng cần một khách đại diện. Hiện hỗ trợ tối đa 8 phòng có cùng số khách, tối đa 30 đêm; chưa hỗ trợ cập nhật/hủy hoặc tìm booking được tạo bên ngoài ứng dụng.
+Mỗi khách trong phòng cần họ tên, email và điện thoại; khách đầu tiên là khách đại diện. Một booking CiHMS chứa tối đa 20 phòng, có thể gồm nhiều hạng phòng, cùng khách sạn và khoảng ngày; các phòng cần cùng số khách. Một hành trình có mã NT-J chung và nhiều booking CiHMS riêng, mỗi chặng một khách sạn/khoảng ngày. Chặng và thông tin khách chưa đặt được lưu nháp trên trình duyệt của nhân viên, mở lại được sau khi tải trang; nháp được xóa khi tạo booking hoặc đăng xuất. Mỗi booking tối đa 30 đêm; chưa hỗ trợ cập nhật/hủy hoặc tìm booking được tạo bên ngoài ứng dụng.
 
-Live cần áp dụng migration `supabase/migrations/202609080001_bookings.sql` trước khi chạy bản mới. Booking live được lưu bền vững trong Supabase; mock dùng bộ nhớ và hiển thị nhãn thử nghiệm.
+Live cần áp dụng các migration trong `supabase/migrations/`, gồm `202609290001_booking_journey_legs.sql`, trước khi chạy bản mới. Booking live được lưu bền vững trong Supabase; mock dùng bộ nhớ và hiển thị nhãn thử nghiệm.
 Xem [hướng dẫn tích hợp CiHMS](docs/cihms-integration.md) để biết thứ tự API và xử lý lỗi.
 
 ## Chạy local
