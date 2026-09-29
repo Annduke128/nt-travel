@@ -78,6 +78,47 @@ test("checkout submits each chosen room rate and the sum of unit prices", async 
   ]);
 });
 
+test("adds named guests per room up to that room's capacity and requotes before booking", async () => {
+  const first = { propertyId: "p1", roomTypeId: "r1", ratePlanId: "rate1", roomTypeName: "Deluxe", ratePlanName: "Breakfast", quantity: 2, total: 4000000, average: 2000000, currency: "VND", maxOccupancy: 2, dailyRates: [], policies: [] };
+  const second = { ...first, roomTypeId: "r2", ratePlanId: "rate2", roomTypeName: "Suite", total: 5000000, maxOccupancy: 4 };
+  const selection: BookingSelection = { requestId: "22222222-2222-4222-8222-222222222222", propertyName: "Demo hotel",
+    search: { destination: "Nha Trang", arrivalDate: "2099-06-01", departureDate: "2099-06-03", rooms: [{ adults: 2, children: 0, infants: 0 }, { adults: 2, children: 0, infants: 0 }] },
+    detail: first, items: [{ detail: first, quantity: 1 }, { detail: second, quantity: 1 }] };
+  const fetcher = vi.fn(async (url: string, init: RequestInit) => {
+    if (url === "/api/availability/detail") {
+      const body = JSON.parse(String(init.body));
+      return new Response(JSON.stringify({ data: { ...second, total: body.rooms[0].adults === 3 ? 6000000 : 7000000 } }), { status: 200 });
+    }
+    return new Response(JSON.stringify({ data: { id: selection.requestId, status: "created" } }), { status: 201 });
+  });
+  vi.stubGlobal("fetch", fetcher);
+  const user = userEvent.setup();
+  render(<BookingCheckout selection={selection} onCreated={vi.fn()} onBack={vi.fn()} />);
+  expect(screen.getByRole("button", { name: "Thêm khách vào phòng 1" })).toBeDisabled();
+  await user.click(screen.getByRole("button", { name: "Thêm khách vào phòng 2" }));
+  expect(await screen.findByLabelText("Tên khách · Phòng 2 · Khách 3")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "Thêm khách vào phòng 2" }));
+  expect(await screen.findByLabelText("Tên khách · Phòng 2 · Khách 4")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Thêm khách vào phòng 2" })).toBeDisabled();
+  for (const [room, count] of [[1, 2], [2, 4]]) {
+    for (let guest = 1; guest <= count; guest += 1) {
+      const suffix = ` · Phòng ${room}${guest > 1 ? ` · Khách ${guest}` : ""}`;
+      await user.type(screen.getByLabelText(`Họ khách${suffix}`), "Nguyen");
+      await user.type(screen.getByLabelText(`Tên khách${suffix}`), `An${guest}`);
+      await user.type(screen.getByLabelText(`Email${suffix}`), `an${room}${guest}@example.com`);
+      await user.type(screen.getByLabelText(`Điện thoại${suffix}`), "0912345678");
+    }
+  }
+  await user.click(screen.getByRole("checkbox"));
+  await user.click(screen.getByRole("button", { name: "Tạo đặt phòng" }));
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => url === "/api/bookings")).toBe(true));
+  const posted = JSON.parse(String(fetcher.mock.calls.find(([url]) => url === "/api/bookings")![1].body));
+  expect(posted.rooms.map((room: { adults: number }) => room.adults)).toEqual([2, 4]);
+  expect(posted.roomGuests.map((guests: unknown[]) => guests.length)).toEqual([2, 4]);
+  expect(posted.roomSelections.map((room: { expectedUnitTotal: number }) => room.expectedUnitTotal)).toEqual([4000000, 7000000]);
+  expect(posted.expectedTotal).toBe(11000000);
+});
+
 test("journey details list every stay and open another leg", async () => {
   const request = { requestId: "22222222-2222-4222-8222-222222222222", journeyId: "11111111-1111-4111-8111-111111111111", journeyLeg: 1,
     destination: "Nha Trang", arrivalDate: "2099-06-01", departureDate: "2099-06-03", propertyId: "p1", roomTypeId: "r1", ratePlanId: "rate1",

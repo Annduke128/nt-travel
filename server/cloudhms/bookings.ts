@@ -69,36 +69,37 @@ export class CloudHmsBookingGateway implements BookingGateway {
   readonly mode = "live" as const;
   constructor(private client: CloudHmsClient, private bedbank: BedbankService, private config: BookingConfig) {}
   async prepare(input: BookingCreateRequest, actor: Profile, reference: string): Promise<PreparedBooking> {
-    const room = input.rooms[0]!;
     const selections = input.roomSelections ?? input.rooms.map(() => ({ roomTypeId: input.roomTypeId, ratePlanId: input.ratePlanId, expectedUnitTotal: input.expectedTotal / input.rooms.length }));
-    const keyOf = (roomTypeId: string, ratePlanId: string) => `${roomTypeId}:${ratePlanId}`;
-    const grouped = new Map<string, { roomTypeId: string; ratePlanId: string; count: number }>();
-    for (const selection of selections) {
-      const key = keyOf(selection.roomTypeId, selection.ratePlanId);
+    const keyOf = (selection: { roomTypeId: string; ratePlanId: string }, room: typeof input.rooms[number]) => `${selection.roomTypeId}:${selection.ratePlanId}:${room.adults}:${room.children}:${room.infants}`;
+    const grouped = new Map<string, { roomTypeId: string; ratePlanId: string; count: number; room: typeof input.rooms[number] }>();
+    for (const [index, selection] of selections.entries()) {
+      const room = input.rooms[index]!;
+      const key = keyOf(selection, room);
       const current = grouped.get(key);
       if (current) current.count += 1;
-      else grouped.set(key, { roomTypeId: selection.roomTypeId, ratePlanId: selection.ratePlanId, count: 1 });
+      else grouped.set(key, { roomTypeId: selection.roomTypeId, ratePlanId: selection.ratePlanId, count: 1, room });
     }
-    const occupancy = { numberOfAdult: room.adults, otherOccupancies: [
+    const occupancyOf = (room: typeof input.rooms[number]) => ({ numberOfAdult: room.adults, otherOccupancies: [
       { otherOccupancyRefID: "child", otherOccupancyRefCode: "child", quantity: room.children },
       { otherOccupancyRefID: "infant", otherOccupancyRefCode: "infant", quantity: room.infants },
-    ] };
-    const [payload, rawDetails] = await Promise.all([
+    ] });
+    const quotes = await Promise.all([...grouped.values()].map(async (selection) => Promise.all([
       this.client.request("/common-trd/v1/crs/booking/get-hotel-availability", { body: {
-        arrivalDate: input.arrivalDate, departureDate: input.departureDate, numberOfRoom: Math.max(...[...grouped.values()].map((selection) => selection.count)),
+        arrivalDate: input.arrivalDate, departureDate: input.departureDate, numberOfRoom: selection.count,
         propertyIds: [input.propertyId], distributionChannelId: this.config.distributionChannelId,
-        roomOccupancy: occupancy, organization: this.config.organizationCode,
+        roomOccupancy: occupancyOf(selection.room), organization: this.config.organizationCode,
       } }),
-      Promise.all([...grouped.values()].map((selection) => this.bedbank.detail({ ...input, rooms: [room], roomTypeId: selection.roomTypeId, ratePlanId: selection.ratePlanId }))),
-    ]);
-    const property = array(dataOf(payload).rates).map(object).find((item) => identifier(object(item.property).id) === input.propertyId);
+      this.bedbank.detail({ ...input, rooms: [selection.room], roomTypeId: selection.roomTypeId, ratePlanId: selection.ratePlanId }),
+    ])));
     const nights = Math.round((Date.parse(input.departureDate) - Date.parse(input.arrivalDate)) / 86_400_000);
     const dates = Array.from({ length: nights }, (_, index) => new Date(Date.parse(input.arrivalDate) + index * 86_400_000).toISOString().slice(0, 10));
     const checked = new Map<string, { detail: RateDetailDto; roomRates: { stayDate: string; roomTypeCode: string; roomTypeName: string; roomTypeRefID: string; ratePlanCode: string; ratePlanRefID: string; allotmentId: string }[] }>();
     const allotmentUsed = new Map<string, number>();
     const allotmentLimit = new Map<string, number>();
     for (const [index, selection] of [...grouped.values()].entries()) {
-      const parsed = rateDetailSchema.safeParse(rawDetails[index]);
+      const [payload, rawDetail] = quotes[index]!;
+      const property = array(dataOf(payload).rates).map(object).find((item) => identifier(object(item.property).id) === input.propertyId);
+      const parsed = rateDetailSchema.safeParse(rawDetail);
       if (!parsed.success) throw invalid();
       const detail = parsed.data;
       const rate = array(property?.rates).map(object).find((item) => {
@@ -107,6 +108,7 @@ export class CloudHmsBookingGateway implements BookingGateway {
       });
       if (!rate || typeof rate.quantity !== "number" || rate.quantity < selection.count) throw new AppError(409, "NO_AVAILABILITY", "Không còn đủ phòng cho yêu cầu này. Vui lòng tìm lại phòng.");
       if (detail.propertyId !== input.propertyId || detail.roomTypeId !== selection.roomTypeId || detail.ratePlanId !== selection.ratePlanId) throw invalid();
+      if (detail.maxOccupancy && selection.room.adults + selection.room.children + selection.room.infants > detail.maxOccupancy) throw new AppError(409, "NO_AVAILABILITY", "Số khách vượt sức chứa của hạng phòng. Vui lòng chọn lại phòng.");
       const nested = object(rate.rateAvailablity);
       const allotment = array(nested.allotments).map(object).find((item) => {
         const id = identifier(item.allotmentId, item.id);
@@ -121,19 +123,19 @@ export class CloudHmsBookingGateway implements BookingGateway {
       allotmentUsed.set(allotmentId, (allotmentUsed.get(allotmentId) ?? 0) + selection.count);
       allotmentLimit.set(allotmentId, Math.min(allotmentLimit.get(allotmentId) ?? Number(allotment.quantity), Number(allotment.quantity)));
       if (detail.dailyRates.length !== nights || dates.some((date) => !detail.dailyRates.some((item) => item.date === date))) throw invalid();
-      checked.set(keyOf(selection.roomTypeId, selection.ratePlanId), { detail,
+      checked.set(keyOf(selection, selection.room), { detail,
         roomRates: dates.map((stayDate) => ({ stayDate, roomTypeCode, roomTypeName: detail.roomTypeName,
           roomTypeRefID: selection.roomTypeId, ratePlanCode, ratePlanRefID: selection.ratePlanId, allotmentId })) });
     }
-    for (const selection of selections) {
-      const detail = checked.get(keyOf(selection.roomTypeId, selection.ratePlanId))!.detail;
+    for (const [index, selection] of selections.entries()) {
+      const detail = checked.get(keyOf(selection, input.rooms[index]!))!.detail;
       if (detail.total !== selection.expectedUnitTotal || detail.currency !== input.currency) throw new AppError(409, "PRICE_CHANGED", "Giá phòng đã thay đổi. Vui lòng tìm lại phòng và xem giá mới trước khi đặt.");
     }
     const body = { organization: this.config.organizationCode, propertyId: input.propertyId,
       arrivalDate: input.arrivalDate, departureDate: input.departureDate,
       distributionChannel: this.config.distributionChannelId, sourceCode: this.config.sourceCode, requestorId: this.config.requestorId,
       reservations: input.guests.map((guest, index) => ({
-        numberOfRoom: 1, totalAmount: { amount: checked.get(keyOf(selections[index]!.roomTypeId, selections[index]!.ratePlanId))!.detail.total, currencyCode: input.currency }, roomOccupancy: occupancy,
+        numberOfRoom: 1, totalAmount: { amount: checked.get(keyOf(selections[index]!, input.rooms[index]!))!.detail.total, currencyCode: input.currency }, roomOccupancy: occupancyOf(input.rooms[index]!),
         isReferenceIdSpecified: true, referenceIds: [{ type: "Opera_TA_Rec_Loc", value: reference }],
         isSpecialRequestSpecified: Boolean(input.notes), specialRequests: input.notes ? [{ requestType: "BookerInstruction", requestContent: input.notes }] : [],
         isProfilesSpecified: true, profiles: [
@@ -142,13 +144,15 @@ export class CloudHmsBookingGateway implements BookingGateway {
           { profileRefID: "BookingPortal", profileType: "BookingClient" },
           ...input.roomGuests[index]!.map((occupant) => ({ ...occupant, profileRefID: "", profileType: "Guest", primarySearchValues: { email: occupant.email, phoneNumber: occupant.phoneNumber } })),
         ],
-        isRoomRatesSpecified: true, roomRates: checked.get(keyOf(selections[index]!.roomTypeId, selections[index]!.ratePlanId))!.roomRates, isPackagesSpecified: false, packages: [],
+        isRoomRatesSpecified: true, roomRates: checked.get(keyOf(selections[index]!, input.rooms[index]!))!.roomRates, isPackagesSpecified: false, packages: [],
       })),
     };
-    const first = checked.get(keyOf(selections[0]!.roomTypeId, selections[0]!.ratePlanId))!.detail;
-    return { propertyName: text(object(property?.property).name), roomTypeName: grouped.size === 1 ? first.roomTypeName : "Nhiều hạng phòng", ratePlanName: grouped.size === 1 ? first.ratePlanName : "Nhiều gói giá",
-      total: selections.reduce((sum, selection) => sum + checked.get(keyOf(selection.roomTypeId, selection.ratePlanId))!.detail.total, 0), currency: input.currency, body,
-      roomLines: selections.map((selection) => { const item = checked.get(keyOf(selection.roomTypeId, selection.ratePlanId))!.detail; return { roomTypeId: selection.roomTypeId, roomTypeName: item.roomTypeName, ratePlanId: selection.ratePlanId, ratePlanName: item.ratePlanName, unitTotal: item.total }; }) };
+    const first = checked.get(keyOf(selections[0]!, input.rooms[0]!))!.detail;
+    const firstProperty = array(dataOf(quotes[0]![0]).rates).map(object).find((item) => identifier(object(item.property).id) === input.propertyId);
+    const distinctRooms = new Set(selections.map((selection) => `${selection.roomTypeId}:${selection.ratePlanId}`)).size;
+    return { propertyName: text(object(firstProperty?.property).name), roomTypeName: distinctRooms === 1 ? first.roomTypeName : "Nhiều hạng phòng", ratePlanName: distinctRooms === 1 ? first.ratePlanName : "Nhiều gói giá",
+      total: selections.reduce((sum, selection, index) => sum + checked.get(keyOf(selection, input.rooms[index]!))!.detail.total, 0), currency: input.currency, body,
+      roomLines: selections.map((selection, index) => { const item = checked.get(keyOf(selection, input.rooms[index]!))!.detail; return { roomTypeId: selection.roomTypeId, roomTypeName: item.roomTypeName, ratePlanId: selection.ratePlanId, ratePlanName: item.ratePlanName, unitTotal: item.total }; }) };
   }
   async create(prepared: PreparedBooking, reference: string): Promise<BookingReservation[]> {
     return parseBookingReservations(await this.client.request("/common-trd/v1/crs/booking", { body: prepared.body, retry: false, correlationId: reference }), false);

@@ -15,7 +15,7 @@ export const roomOccupancySchema = z.object({
   infants: z.number().int().min(0).max(4),
 });
 
-export const searchRequestSchema = z.object({
+const baseSearchRequestSchema = z.object({
   destination: z.string().trim().min(1).max(120),
   arrivalDate: calendarDate("Ngày nhận phòng không hợp lệ"),
   departureDate: calendarDate("Ngày trả phòng không hợp lệ"),
@@ -24,8 +24,10 @@ export const searchRequestSchema = z.object({
   if (value.departureDate <= value.arrivalDate) {
     context.addIssue({ code: "custom", path: ["departureDate"], message: "Ngày trả phòng phải sau ngày nhận phòng" });
   }
-  // CloudHMS availability chỉ nhận một roomOccupancy kèm numberOfRoom, nên V1 không thể
-  // biểu diễn các phòng có số khách khác nhau trong cùng một truy vấn.
+});
+
+export const searchRequestSchema = baseSearchRequestSchema.superRefine((value, context) => {
+  // Màn hình tìm kiếm dùng một occupancy cho cả nhóm phòng; checkout báo giá lại từng nhóm khi số khách khác nhau.
   const [first, ...rest] = value.rooms;
   if (first && rest.some((room) => room.adults !== first.adults || room.children !== first.children || room.infants !== first.infants)) {
     context.addIssue({ code: "custom", path: ["rooms"], message: "V1 chỉ hỗ trợ các phòng có cùng số khách" });
@@ -75,7 +77,8 @@ export const bookingGuestSchema = z.object({
   firstName: z.string().trim().min(1).max(100), lastName: z.string().trim().min(1).max(100),
   email: z.string().trim().email().max(254), phoneNumber: z.string().trim().regex(/^\+?[0-9 ()-]{7,25}$/),
 });
-export const bookingCreateSchema = detailSearchSchema.extend({
+export const bookingCreateSchema = baseSearchRequestSchema.safeExtend({
+  propertyId: z.string().min(1), roomTypeId: z.string().min(1), ratePlanId: z.string().min(1),
   requestId: z.uuid(), expectedTotal: z.number().positive().max(1e12), currency: z.string().regex(/^[A-Z]{3}$/),
   journeyId: z.uuid().optional(), journeyLeg: z.number().int().min(1).max(20).optional(),
   roomSelections: z.array(z.object({ roomTypeId: z.string().min(1), ratePlanId: z.string().min(1), expectedUnitTotal: z.number().positive().max(1e12) })).min(1).max(MAX_BOOKING_ROOMS).optional(),

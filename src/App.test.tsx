@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import App from "./App";
@@ -251,6 +251,14 @@ describe("NT Travel bedbank v1", () => {
   });
 
   test("restores an unbooked stay and its guest details after reload", async () => {
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation(async (url, init) => {
+      const response = await original(url, init);
+      if (String(url) !== "/api/availability/detail") return response;
+      const payload = await response.json();
+      const adults = JSON.parse(String(init?.body)).rooms[0].adults;
+      return json({ data: { ...payload.data, maxOccupancy: 3, total: adults === 3 ? 6000000 : 4900000 } });
+    });
     const user = userEvent.setup();
     render(<App />);
     await user.type(await screen.findByLabelText("Điểm đến hoặc khách sạn"), "Nha Trang");
@@ -258,12 +266,16 @@ describe("NT Travel bedbank v1", () => {
     await user.click(await screen.findByRole("button", { name: /xem phòng tại vinpearl beachfront/i }));
     await user.click(await screen.findByRole("button", { name: "Đặt phòng Deluxe Ocean" }));
     await user.type(await screen.findByLabelText("Họ khách · Phòng 1"), "Nguyen");
+    await user.click(screen.getByRole("button", { name: "Thêm khách vào phòng 1" }));
+    await user.type(await screen.findByLabelText("Tên khách · Phòng 1 · Khách 3"), "Chi");
     await user.type(screen.getByLabelText("Yêu cầu đặc biệt"), "Giường phụ");
     await waitFor(() => expect(localStorage.getItem("nt-journey-drafts:admin-1")).toContain("Giường phụ"));
     cleanup();
     render(<App />);
     await user.click(await screen.findByRole("button", { name: /Mở chặng 1 · Vinpearl Beachfront/ }));
     expect(screen.getByLabelText("Họ khách · Phòng 1")).toHaveValue("Nguyen");
+    expect(screen.getByLabelText("Tên khách · Phòng 1 · Khách 3")).toHaveValue("Chi");
+    expect(screen.getByText(/3\/3 khách/)).toBeVisible();
     expect(screen.getByLabelText("Yêu cầu đặc biệt")).toHaveValue("Giường phụ");
   });
 
@@ -377,8 +389,9 @@ describe("NT Travel bedbank v1", () => {
     await user.click(screen.getByRole("button", { name: "Xem giá chi tiết Deluxe Ocean" }));
     await user.click(await screen.findByRole("button", { name: "Tiếp tục đặt phòng" }));
     expect(await screen.findByRole("heading", { name: "Thông tin đặt phòng" })).toBeVisible();
-    expect(screen.getByText(/Deluxe Ocean.*4\.900\.000/)).toBeVisible();
-    expect(screen.getByText(/Suite.*7\.000\.000/)).toBeVisible();
+    const priceLines = within(screen.getByRole("list", { name: "Giá từng phòng" })).getAllByRole("listitem");
+    expect(priceLines[0]).toHaveTextContent(/Deluxe Ocean.*4\.900\.000/);
+    expect(priceLines[1]).toHaveTextContent(/Suite.*7\.000\.000/);
   });
 
   test("a rate plan without upstream tax shows a dash, never zero", async () => {

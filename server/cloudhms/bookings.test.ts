@@ -65,6 +65,35 @@ describe("CiHMS booking contract", () => {
     expect(prepared.total).toBe(3600000);
     expect((prepared.body as { reservations: unknown[] }).reservations).toHaveLength(2);
   });
+  test("quotes and sends the occupancy and price of each room when guest counts differ", async () => {
+    const { gateway, request, bedbank } = setup();
+    const available = structuredClone(inventory);
+    available.data.rates[0]!.rates[0]!.quantity = 2;
+    available.data.rates[0]!.rates[0]!.rateAvailablity.allotments[0]!.quantity = 2;
+    request.mockResolvedValue(available);
+    vi.mocked(bedbank.detail).mockImplementation(async (query) => ({
+      propertyId: input.propertyId, roomTypeId: input.roomTypeId, ratePlanId: input.ratePlanId,
+      roomTypeName: "Standard King", ratePlanName: "PHMS-T18", quantity: 2, maxOccupancy: 4,
+      total: query.rooms[0]!.adults === 3 ? 2400000 : 1800000, average: 900000, currency: "VND",
+      dailyRates: [{ date: "2026-06-01", amount: 900000 }, { date: "2026-06-02", amount: 900000 }], policies: [],
+    }));
+    const lead = { ...input.guests[0]!, firstName: "Binh" };
+    const secondRoomGuests = [lead, ...input.roomGuests[0]!.slice(1), { ...lead, firstName: "Dung" }];
+    const prepared = await gateway.prepare({ ...input,
+      rooms: [input.rooms[0]!, { adults: 3, children: 1, infants: 0 }],
+      guests: [input.guests[0]!, lead], roomGuests: [input.roomGuests[0]!, secondRoomGuests],
+      roomSelections: [
+        { roomTypeId: input.roomTypeId, ratePlanId: input.ratePlanId, expectedUnitTotal: 1800000 },
+        { roomTypeId: input.roomTypeId, ratePlanId: input.ratePlanId, expectedUnitTotal: 2400000 },
+      ], expectedTotal: 4200000,
+    }, actor, "ref");
+    expect(prepared.total).toBe(4200000);
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(request).toHaveBeenNthCalledWith(1, "/common-trd/v1/crs/booking/get-hotel-availability", expect.objectContaining({ body: expect.objectContaining({ roomOccupancy: expect.objectContaining({ numberOfAdult: 2 }) }) }));
+    expect(request).toHaveBeenNthCalledWith(2, "/common-trd/v1/crs/booking/get-hotel-availability", expect.objectContaining({ body: expect.objectContaining({ roomOccupancy: expect.objectContaining({ numberOfAdult: 3 }) }) }));
+    expect((prepared.body as { reservations: { totalAmount: { amount: number }; roomOccupancy: { numberOfAdult: number } }[] }).reservations)
+      .toMatchObject([{ totalAmount: { amount: 1800000 }, roomOccupancy: { numberOfAdult: 2 } }, { totalAmount: { amount: 2400000 }, roomOccupancy: { numberOfAdult: 3 } }]);
+  });
   test("prepares different rate plans with a checked price for each room in one booking", async () => {
     const { gateway, request, bedbank } = setup();
     const mixedInventory = structuredClone(inventory);

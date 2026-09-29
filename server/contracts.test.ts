@@ -67,6 +67,13 @@ describe("mixed room booking contract", () => {
     expect(bookingCreateSchema.parse(booking).roomSelections).toHaveLength(2);
   });
 
+  test("accepts different guest counts by room while keeping search quotes uniform", () => {
+    const rooms = [booking.rooms[0]!, { ...booking.rooms[1]!, adults: 3 }];
+    const roomGuests = [booking.roomGuests[0]!, [...booking.roomGuests[1]!, { ...guestA, firstName: "Chi" }]];
+    expect(bookingCreateSchema.parse({ ...booking, rooms, roomGuests }).rooms[1]!.adults).toBe(3);
+    expect(() => parseSearchRequest({ ...validSearch, rooms })).toThrow();
+  });
+
   test("rejects a selection count or total that differs from the rooms", () => {
     expect(() => bookingCreateSchema.parse({ ...booking, roomSelections: booking.roomSelections.slice(0, 1) })).toThrow();
     expect(() => bookingCreateSchema.parse({ ...booking, expectedTotal: 6000000 })).toThrow();
