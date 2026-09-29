@@ -340,6 +340,7 @@ describe("NT Travel bedbank v1", () => {
   test("selects two room categories and shows each unit price before booking", async () => {
     const original = vi.mocked(fetch).getMockImplementation()!;
     vi.mocked(fetch).mockImplementation((url, init) => {
+      if (url === "/api/availability/hotels") return json({ data: [{ id: "p1", name: "Vinpearl Beachfront Nha Trang", city: "Nha Trang", imageUrl: "https://example.com/hotel.jpg", quantity: 4, fromPrice: 2450000, currency: "VND" }] });
       if (url === "/api/availability/rooms") return json({ data: [
         { propertyId: "p1", roomTypeId: "r1", roomTypeName: "Deluxe Ocean", ratePlanId: "rate1", ratePlanName: "Breakfast", quantity: 4, total: 4900000, average: 2450000, currency: "VND" },
         { propertyId: "p1", roomTypeId: "r2", roomTypeName: "Suite", ratePlanId: "rate2", ratePlanName: "Flexible", quantity: 2, total: 7000000, average: 3500000, currency: "VND" },
@@ -362,8 +363,12 @@ describe("NT Travel bedbank v1", () => {
     await user.click(screen.getByRole("button", { name: "Tìm khách sạn" }));
     expect(JSON.parse(String(vi.mocked(fetch).mock.calls.find(([url]) => url === "/api/availability/hotels")?.[1]?.body)).rooms).toHaveLength(1);
     await user.click(await screen.findByRole("button", { name: /xem phòng tại vinpearl beachfront/i }));
+    expect(await screen.findByRole("table", { name: "Hạng phòng tại Vinpearl Beachfront Nha Trang" })).toBeVisible();
+    expect(screen.getAllByRole("columnheader")).toHaveLength(6);
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
     expect(JSON.parse(String(vi.mocked(fetch).mock.calls.find(([url]) => url === "/api/availability/rooms")?.[1]?.body)).rooms).toHaveLength(1);
     await user.click(await screen.findByRole("button", { name: "Chọn Deluxe Ocean" }));
+    expect(screen.getByLabelText("Số phòng Deluxe Ocean")).toHaveValue(1);
     await user.click(screen.getByRole("button", { name: "Chọn Suite" }));
     expect(screen.getByText(/Deluxe Ocean.*4\.900\.000/)).toBeVisible();
     expect(screen.getByText(/Suite.*7\.000\.000/)).toBeVisible();
