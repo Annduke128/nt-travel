@@ -55,6 +55,25 @@ function routed(overrides: Record<string, unknown> = {}) {
 }
 
 describe("CloudHMS property catalog", () => {
+  test("exposes supplied stars and property type without inventing missing metadata", async () => {
+    const catalog = clone(hotelsInfo);
+    Object.assign(catalog.data.items.find((item) => item.id === VINOASIS)!, { star: 5, hotelType: { name: "Villa" } });
+    const { service: bedbank } = routed({ catalog });
+    const result = await bedbank.properties("phú quốc");
+    expect(result[0]).toMatchObject({ starRating: 5, propertyType: "Villa" });
+  });
+
+  test("preserves hotel services and each program's price and refund policy for filtering", async () => {
+    const hotels = clone(hotelAvailability);
+    const entry = hotels.data.rates[0]!;
+    Object.assign(entry.property, { star: 4, hotelType: { name: "Khách sạn" }, amenities: [{ name: "Hồ bơi" }, { name: "Spa" }] });
+    Object.assign(entry.rates[1]!, { rateAvailablity: { ratePlan: { cancelPolicy: { isRefundable: true } } } });
+    const { service: bedbank } = routed({ hotels });
+    const result = await bedbank.hotels(search);
+    expect(result[0]).toMatchObject({ starRating: 4, propertyType: "Khách sạn", services: ["Hồ bơi", "Spa"] });
+    expect(result[0]).toHaveProperty("programs", expect.arrayContaining([expect.objectContaining({ total: 1000000, currency: "VND", cancellationPolicy: "refundable" })]));
+  });
+
   test("keeps paging when the server caps the requested page size", async () => {
     const request = vi.fn(async (path: string) => path.includes("page=0") ? catalogPage(0, 30) : catalogPage(1, 20));
 
@@ -182,7 +201,7 @@ describe("CloudHMS hotel availability", () => {
     const [hotel] = await bedbank.hotels(search);
 
     // Rate 0 đồng (quantity 47) là rate chưa nạp giá cho channel; giá dẫn phải là rate thật.
-    expect(hotel).toEqual({ id: VINOASIS, name: "VinOasis Phú Quốc", city: "Phú Quốc", quantity: 146, fromPrice: 1_000_000, currency: "VND" });
+    expect(hotel).toEqual({ id: VINOASIS, name: "VinOasis Phú Quốc", city: "Phú Quốc", quantity: 146, fromPrice: 1_000_000, currency: "VND", programs: [{ total: 1_000_000, currency: "VND" }] });
   });
 
   test("reports the matched properties when every rate is unpriced", async () => {
@@ -242,6 +261,36 @@ describe("CloudHMS hotel availability", () => {
 });
 
 describe("CloudHMS room availability", () => {
+  test("keeps allotment-specific prices and inventory distinct under the same room and rate plan", async () => {
+    const rooms = clone(roomAvailability);
+    const first = rooms.data.roomAvailabilityRates[0]!;
+    Object.assign(first, { allotments: [{ allotmentId: "agent", name: "BEST RATES - AGENT", quantity: 3 }] });
+    const second = clone(first);
+    Object.assign(second, { totalAmount: { amount: { amount: 4500000, currencyCode: "VND" } }, averageAmount: { amount: 2250000, currencyCode: "VND" }, allotments: [{ allotmentId: "summer", name: "SUMMER PROMOTION", quantity: 1 }] });
+    rooms.data.roomAvailabilityRates = [first, second];
+    const { service: bedbank } = routed({ rooms });
+    const result = await bedbank.rooms({ ...search, propertyId: TAY_NINH });
+    expect(result).toMatchObject([
+      { roomTypeId: SUITE_ROOM_TYPE, ratePlanId: BABBAG_RATE_PLAN, allotmentId: "agent", allotmentName: "BEST RATES - AGENT", quantity: 3, total: 5400000 },
+      { roomTypeId: SUITE_ROOM_TYPE, ratePlanId: BABBAG_RATE_PLAN, allotmentId: "summer", allotmentName: "SUMMER PROMOTION", quantity: 1, total: 4500000 },
+    ]);
+  });
+
+  test("reads eligible allotments from hotel inventory when room availability omits them", async () => {
+    const hotels = clone(hotelAvailability);
+    const entry = hotels.data.rates[0]!;
+    entry.property.id = TAY_NINH;
+    const rate = entry.rates[1]!;
+    Object.assign(rate, { roomTypeID: SUITE_ROOM_TYPE, ratePlanID: BABBAG_RATE_PLAN, totalAmount: { amount: { amount: 5400000, currencyCode: "VND" } },
+      rateAvailablity: { roomTypeId: SUITE_ROOM_TYPE, ratePlanId: BABBAG_RATE_PLAN, allotments: [{ id: "agent", name: "Agent", quantity: 2 }, { id: "summer", name: "Summer", quantity: 1 }] } });
+    entry.rates = [rate];
+    const { service: bedbank } = routed({ hotels });
+    const result = await bedbank.rooms({ ...search, propertyId: TAY_NINH });
+    expect(result.filter((room) => room.roomTypeId === SUITE_ROOM_TYPE)).toMatchObject([
+      { allotmentId: "agent", allotmentName: "Agent", quantity: 2 }, { allotmentId: "summer", allotmentName: "Summer", quantity: 1 },
+    ]);
+  });
+
   test("reads the ids nested in the rate instead of the zero GUIDs at the top level", async () => {
     const { service: bedbank } = routed();
 
@@ -297,6 +346,38 @@ describe("CloudHMS room availability", () => {
 });
 
 describe("CloudHMS rate detail", () => {
+  test("quotes the selected allotment and rejects other allotments or mismatching prices", async () => {
+    const hotels = clone(hotelAvailability);
+    const entry = hotels.data.rates[0]!;
+    const rate = entry.rates[1]!;
+    Object.assign(rate, { roomTypeID: DETAIL_ROOM_TYPE, ratePlanID: DETAIL_RATE_PLAN, totalAmount: { amount: { amount: 1800000, currencyCode: "VND" } }, quantity: 3,
+      rateAvailablity: { roomTypeId: DETAIL_ROOM_TYPE, ratePlanId: DETAIL_RATE_PLAN, allotments: [{ id: "summer", name: "Summer Promotion", quantity: 2 }] } });
+    entry.rates = [rate];
+    const { service: bedbank } = routed({ hotels });
+    const query = { ...search, propertyId: VINOASIS, roomTypeId: DETAIL_ROOM_TYPE, ratePlanId: DETAIL_RATE_PLAN, allotmentId: "summer" };
+    expect(await bedbank.detail(query)).toMatchObject({ allotmentId: "summer", allotmentName: "Summer Promotion", quantity: 2, total: 1800000 });
+    await expect(bedbank.detail({ ...query, allotmentId: "other-agency" })).rejects.toMatchObject({ code: "NO_AVAILABILITY" });
+    rate.totalAmount.amount.amount = 1700000;
+    const changed = routed({ hotels }).service;
+    await expect(changed.detail(query)).rejects.toMatchObject({ code: "PRICE_CHANGED" });
+  });
+
+  test("selects the matching allotment price when detail contains the same program more than once", async () => {
+    const hotels = clone(hotelAvailability);
+    const entry = hotels.data.rates[0]!;
+    const rate = entry.rates[1]!;
+    Object.assign(rate, { roomTypeID: DETAIL_ROOM_TYPE, ratePlanID: DETAIL_RATE_PLAN, totalAmount: { amount: { amount: 1500000, currencyCode: "VND" } }, quantity: 3,
+      rateAvailablity: { allotments: [{ id: "summer", name: "Summer", quantity: 2 }] } });
+    entry.rates = [rate];
+    const detail = clone(roomDetailAvailability);
+    const second = clone(detail.data.roomAvailabilityRates[0]!);
+    Object.assign(second, { totalAmount: { amount: { amount: 1500000, currencyCode: "VND" } }, averageAmount: { amount: 750000, currencyCode: "VND" } });
+    second.rates.forEach((daily) => { daily.amount.amount.amount = 750000; });
+    detail.data.roomAvailabilityRates.push(second);
+    const { service: bedbank } = routed({ hotels, detail });
+    expect(await bedbank.detail({ ...search, propertyId: VINOASIS, roomTypeId: DETAIL_ROOM_TYPE, ratePlanId: DETAIL_RATE_PLAN, allotmentId: "summer" })).toMatchObject({ allotmentId: "summer", total: 1500000 });
+  });
+
   test("rejects detail for an unrelated rate instead of using it as a booking quote", async () => {
     const { service: bedbank } = routed();
     await expect(bedbank.detail({ ...search, propertyId: VINOASIS, roomTypeId: "unrelated", ratePlanId: DETAIL_RATE_PLAN })).rejects.toMatchObject({ code: "NO_AVAILABILITY" });

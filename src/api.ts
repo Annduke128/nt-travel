@@ -1,4 +1,4 @@
-import type { BookingCreateRequest, BookingDto, BookingGuaranteesDto, HotelAvailabilityDto, Profile, PropertyDto, RateDetailDto, RoomAvailabilityDto, SearchRequest } from "../shared/contracts";
+import type { BookingCreateRequest, BookingDto, BookingGuaranteesDto, HotelAvailabilityDto, Profile, PropertyDto, RateDetailDto, RateDetailRequest, RoomAvailabilityDto, SearchRequest } from "../shared/contracts";
 
 export class ApiError extends Error {
   constructor(public readonly code: string, message: string, public readonly status: number, public readonly details?: unknown) { super(message); }
@@ -29,7 +29,7 @@ export const bedbankApi = {
   properties: (query: string) => api<PropertyDto[]>(`/api/properties?query=${encodeURIComponent(query)}`),
   hotels: (search: SearchRequest) => post<HotelAvailabilityDto[]>("/api/availability/hotels", search),
   rooms: (search: SearchRequest & { propertyId: string }) => post<RoomAvailabilityDto[]>("/api/availability/rooms", search),
-  detail: (search: SearchRequest & { propertyId: string; roomTypeId: string; ratePlanId: string }) => post<RateDetailDto>("/api/availability/detail", search),
+  detail: (search: RateDetailRequest) => post<RateDetailDto>("/api/availability/detail", search),
   bookings: () => api<BookingDto[]>("/api/bookings"),
   journeyBookings: (id: string) => api<BookingDto[]>(`/api/journeys/${encodeURIComponent(id)}/bookings`),
   booking: (id: string) => api<BookingDto>(`/api/bookings/${encodeURIComponent(id)}`),

@@ -9,8 +9,8 @@ const actor: Profile = { userId: "user-1", displayName: "NT Staff", email: "staf
 const input: BookingCreateRequest = {
   requestId: "22222222-2222-4222-8222-222222222222", destination: "Nha Trang", arrivalDate: "2027-06-01", departureDate: "2027-06-03",
   rooms: [{ adults: 2, children: 0, infants: 0 }], propertyId: "p1", roomTypeId: "r1", ratePlanId: "rate1",
-  expectedTotal: 1800000, currency: "VND", guests: [{ firstName: "An", lastName: "Nguyen", email: "guest@example.com", phoneNumber: "0912345678" }],
-  roomGuests: [[{ firstName: "An", lastName: "Nguyen", email: "guest@example.com", phoneNumber: "0912345678" }, { firstName: "Binh", lastName: "Tran", email: "binh@example.com", phoneNumber: "0912345679" }]], notes: "", acceptedPolicies: true,
+  expectedTotal: 1800000, currency: "VND", guests: [{ firstName: "An", lastName: "Nguyen", country: "VN", nationality: "VN", email: "guest@example.com", phoneNumber: "0912345678" }],
+  roomGuests: [[{ firstName: "An", lastName: "Nguyen", country: "VN", nationality: "VN", email: "guest@example.com", phoneNumber: "0912345678" }, { firstName: "Binh", lastName: "Tran", country: "VN", nationality: "VN", email: "binh@example.com", phoneNumber: "0912345679" }]], notes: "", acceptedPolicies: true,
 };
 const reservation = { id: "res1", confirmationNumber: "VP123", status: "Prospect" };
 const guarantee: BookingGuarantee = { reservationId: "res1", amount: 500000, currency: "VND", methods: [{ id: "g1", policyRefId: "p1", type: "Deposit", amount: 500000, currency: "VND" }] };

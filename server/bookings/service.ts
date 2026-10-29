@@ -1,8 +1,9 @@
-import type { BookingCreateRequest, BookingDto, BookingGuarantee, BookingGuaranteesDto, BookingReservation, BookingRoomLine, Profile } from "../../shared/contracts.js";
+import type { BookingCreateRequest, BookingDto, BookingGuarantee, BookingGuaranteesDto, BookingReservation, BookingRoomLine, Profile, RateIdentity } from "../../shared/contracts.js";
 import { createHash } from "node:crypto";
 import { AppError } from "../errors.js";
 import type { BookingRecord, BookingStore } from "./store.js";
-export type PreparedBooking = { propertyName: string; roomTypeName: string; ratePlanName: string; total: number; currency: string; body: unknown; roomLines?: BookingRoomLine[] };
+export type AvailabilityCheck = RateIdentity & { arrivalDate: string; departureDate: string; quantity: number };
+export type PreparedBooking = { propertyName: string; roomTypeName: string; ratePlanName: string; total: number; currency: string; body: unknown; roomLines?: BookingRoomLine[]; availabilityChecks?: AvailabilityCheck[] };
 export interface BookingGateway {
   mode: "mock" | "live";
   prepare(input: BookingCreateRequest, actor: Profile, reference: string): Promise<PreparedBooking>;

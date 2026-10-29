@@ -1,4 +1,4 @@
-import type { HotelAvailabilityDto, Profile, PropertyDto, RateDetailDto, Role, RoomAvailabilityDto, SearchRequest, UserStatus } from "../shared/contracts.js";
+import type { HotelAvailabilityDto, Profile, PropertyDto, RateDetailDto, RateDetailRequest, Role, RoomAvailabilityDto, SearchRequest, UserStatus } from "../shared/contracts.js";
 export type { Profile, Role, UserStatus } from "../shared/contracts.js";
 
 export type Session = { profile: Profile; accessToken: string; refreshToken: string; expiresIn: number };
@@ -21,5 +21,5 @@ export interface BedbankService {
   properties(query: string): Promise<PropertyDto[]>;
   hotels(search: SearchRequest): Promise<HotelAvailabilityDto[]>;
   rooms(search: SearchRequest & { propertyId: string }): Promise<RoomAvailabilityDto[]>;
-  detail(search: SearchRequest & { propertyId: string; roomTypeId: string; ratePlanId: string }): Promise<RateDetailDto>;
+  detail(search: RateDetailRequest): Promise<RateDetailDto>;
 }

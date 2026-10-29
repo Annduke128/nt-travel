@@ -52,7 +52,7 @@ describe("BFF", () => {
     const app = createApp({ ...deps, bedbank, bookings });
     const input = { requestId: "22222222-2222-4222-8222-222222222222", journeyId: "22222222-2222-4222-8222-222222222222", journeyLeg: 1, destination: "Nha Trang", arrivalDate: "2099-06-01", departureDate: "2099-06-03",
       rooms: [{ adults: 2, children: 0, infants: 0 }], propertyId: "mock-nha-trang", roomTypeId: "deluxe-ocean", ratePlanId: "breakfast-flex",
-      expectedTotal: 4900000, currency: "VND", guests: [{ firstName: "An", lastName: "Nguyen", email: "guest@example.com", phoneNumber: "0912345678" }], roomGuests: [[{ firstName: "An", lastName: "Nguyen", email: "guest@example.com", phoneNumber: "0912345678" }, { firstName: "Binh", lastName: "Tran", email: "binh@example.com", phoneNumber: "0912345679" }]], notes: "", acceptedPolicies: true };
+      expectedTotal: 4900000, currency: "VND", guests: [{ firstName: "An", lastName: "Nguyen", country: "VN", nationality: "VN", email: "guest@example.com", phoneNumber: "0912345678" }], roomGuests: [[{ firstName: "An", lastName: "Nguyen", country: "VN", nationality: "VN", email: "guest@example.com", phoneNumber: "0912345678" }, { firstName: "Binh", lastName: "Tran", country: "VN", nationality: "VN", email: "binh@example.com", phoneNumber: "0912345679" }]], notes: "", acceptedPolicies: true };
     const created = await request(app).post("/api/bookings").set("Cookie", "nt_access=access").send(input);
     expect(created.status).toBe(201);
     expect(created.body.data.status).toBe("created");

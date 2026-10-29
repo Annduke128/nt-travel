@@ -1,3 +1,4 @@
+import { isCountryCode } from "../shared/countries.js";
 import { z } from "zod";
 import { MAX_BOOKING_ROOMS } from "../shared/contracts.js";
 export type { HotelAvailabilityDto, NoAvailabilityDetails, PropertyDto, RateDetailDto, RoomAvailabilityDto, SearchRequest } from "../shared/contracts.js";
@@ -42,18 +43,25 @@ export const parseSearchRequest = (input: unknown): SearchRequest => searchReque
 const ZERO_GUID = "00000000-0000-0000-0000-000000000000";
 const upstreamId = z.string().min(1).refine((value) => value !== ZERO_GUID, "CloudHMS trả định danh rỗng");
 
-export const propertySchema = z.object({ id: upstreamId, name: z.string(), city: z.string(), imageUrl: z.string().url().optional() });
+const cancellationPolicySchema = z.enum(["refundable", "non-refundable"]);
+const rateFilterSchema = z.object({ total: z.number().nonnegative(), currency: z.string().length(3), cancellationPolicy: cancellationPolicySchema.optional(), services: z.array(z.string()).optional() });
+export const propertySchema = z.object({
+  id: upstreamId, name: z.string(), city: z.string(), imageUrl: z.string().url().optional(),
+  starRating: z.number().int().min(1).max(5).optional(), propertyType: z.string().min(1).optional(), services: z.array(z.string()).optional(),
+});
 
 export const hotelAvailabilitySchema = propertySchema.extend({
   quantity: z.number().int().nonnegative(),
   fromPrice: z.number().nonnegative(),
   currency: z.string().min(3).max(3),
+  programs: z.array(rateFilterSchema).optional(),
 });
 
 export const roomAvailabilitySchema = z.object({
   propertyId: upstreamId,
   roomTypeId: upstreamId,
   roomTypeName: z.string().min(1),
+  roomTypeCode: z.string().min(1).optional(),
   ratePlanId: upstreamId,
   ratePlanName: z.string().min(1),
   quantity: z.number().int().nonnegative(),
@@ -63,6 +71,8 @@ export const roomAvailabilitySchema = z.object({
   currency: z.string().min(3).max(3),
   imageUrl: z.string().url().optional(),
   maxOccupancy: z.number().int().positive().optional(),
+  cancellationPolicy: cancellationPolicySchema.optional(), services: z.array(z.string()).optional(),
+  allotmentId: upstreamId.optional(), allotmentName: z.string().min(1).optional(),
 });
 
 export const rateDetailSchema = roomAvailabilitySchema.extend({
@@ -71,17 +81,22 @@ export const rateDetailSchema = roomAvailabilitySchema.extend({
 });
 
 export const roomSearchSchema = searchRequestSchema.extend({ propertyId: z.string().min(1) });
-export const detailSearchSchema = roomSearchSchema.extend({ roomTypeId: z.string().min(1), ratePlanId: z.string().min(1) });
+export const detailSearchSchema = roomSearchSchema.extend({ roomTypeId: z.string().min(1), ratePlanId: z.string().min(1), allotmentId: upstreamId.optional() });
 
+const countryCode = z.string().trim().toUpperCase().refine(isCountryCode, "Chọn mã quốc gia hợp lệ");
 export const bookingGuestSchema = z.object({
   firstName: z.string().trim().min(1).max(100), lastName: z.string().trim().min(1).max(100),
-  email: z.string().trim().email().max(254), phoneNumber: z.string().trim().regex(/^\+?[0-9 ()-]{7,25}$/),
+  country: countryCode, nationality: countryCode,
+  email: z.string().trim().max(254).refine((value) => !value || z.email().safeParse(value).success, "Email không hợp lệ").default(""),
+  phoneNumber: z.string().trim().regex(/^$|^\+?[0-9 ()-]{7,25}$/).default(""),
 });
 export const bookingCreateSchema = baseSearchRequestSchema.safeExtend({
   propertyId: z.string().min(1), roomTypeId: z.string().min(1), ratePlanId: z.string().min(1),
+  allotmentId: upstreamId.optional(),
   requestId: z.uuid(), expectedTotal: z.number().positive().max(1e12), currency: z.string().regex(/^[A-Z]{3}$/),
   journeyId: z.uuid().optional(), journeyLeg: z.number().int().min(1).max(20).optional(),
-  roomSelections: z.array(z.object({ roomTypeId: z.string().min(1), ratePlanId: z.string().min(1), expectedUnitTotal: z.number().positive().max(1e12) })).min(1).max(MAX_BOOKING_ROOMS).optional(),
+  roomSelections: z.array(z.object({ roomTypeId: z.string().min(1), ratePlanId: z.string().min(1), allotmentId: upstreamId.optional(), expectedUnitTotal: z.number().positive().max(1e12) })).min(1).max(MAX_BOOKING_ROOMS).optional(),
+  roomStaySelections: z.array(z.array(z.object({ roomTypeId: upstreamId, ratePlanId: upstreamId, allotmentId: upstreamId.optional(), expectedUnitTotal: z.number().positive().max(1e12), arrivalDate: calendarDate("Ngày bắt đầu không hợp lệ"), departureDate: calendarDate("Ngày kết thúc không hợp lệ") })).min(1).max(30)).min(1).max(MAX_BOOKING_ROOMS).optional(),
   guests: z.array(bookingGuestSchema).min(1).max(MAX_BOOKING_ROOMS), notes: z.string().trim().max(1000).default(""),
   roomGuests: z.array(z.array(bookingGuestSchema).min(1).max(18)).min(1).max(MAX_BOOKING_ROOMS),
   acceptedPolicies: z.literal(true),
@@ -97,8 +112,24 @@ export const bookingCreateSchema = baseSearchRequestSchema.safeExtend({
   if (value.roomSelections) {
     if (value.roomSelections.length !== value.rooms.length) context.addIssue({ code: "custom", path: ["roomSelections"], message: "Cần chọn hạng phòng cho từng phòng" });
     if (value.roomSelections[0]?.roomTypeId !== value.roomTypeId || value.roomSelections[0]?.ratePlanId !== value.ratePlanId) context.addIssue({ code: "custom", path: ["roomSelections"], message: "Hạng phòng đầu tiên không khớp" });
+    if (value.allotmentId && value.roomSelections[0]?.allotmentId !== value.allotmentId) context.addIssue({ code: "custom", path: ["roomSelections"], message: "Allotment của phòng đầu tiên không khớp" });
     const sum = value.roomSelections.reduce((total, room) => total + room.expectedUnitTotal, 0);
     if (sum !== value.expectedTotal) context.addIssue({ code: "custom", path: ["expectedTotal"], message: "Tổng giá không khớp với giá từng phòng" });
+  }
+  if (value.roomStaySelections) {
+    if (value.roomSelections) context.addIssue({ code: "custom", path: ["roomStaySelections"], message: "Chỉ dùng một cách chọn mã phòng" });
+    if (value.roomStaySelections.length !== value.rooms.length) context.addIssue({ code: "custom", path: ["roomStaySelections"], message: "Cần lịch mã phòng cho từng nhóm khách" });
+    value.roomStaySelections.forEach((stays, index) => {
+      let cursor = value.arrivalDate;
+      for (const stay of stays) {
+        if (stay.arrivalDate !== cursor || stay.departureDate <= stay.arrivalDate || stay.departureDate > value.departureDate) context.addIssue({ code: "custom", path: ["roomStaySelections", index], message: "Các đêm phải liên tục, không trùng hoặc thiếu ngày" });
+        cursor = stay.departureDate;
+      }
+      if (cursor !== value.departureDate) context.addIssue({ code: "custom", path: ["roomStaySelections", index], message: "Lịch phòng phải đủ toàn bộ kỳ lưu trú" });
+    });
+    const first = value.roomStaySelections[0]?.[0];
+    if (first?.roomTypeId !== value.roomTypeId || first?.ratePlanId !== value.ratePlanId || (value.allotmentId && first?.allotmentId !== value.allotmentId)) context.addIssue({ code: "custom", path: ["roomStaySelections"], message: "Mã phòng đầu tiên không khớp" });
+    if (value.roomStaySelections.flat().reduce((sum, stay) => sum + stay.expectedUnitTotal, 0) !== value.expectedTotal) context.addIssue({ code: "custom", path: ["expectedTotal"], message: "Tổng giá không khớp với lịch phòng" });
   }
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Ho_Chi_Minh", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
   if (value.arrivalDate < today) context.addIssue({ code: "custom", path: ["arrivalDate"], message: "Ngày nhận phòng đã qua" });

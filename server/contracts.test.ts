@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, test } from "vitest";
-import { bookingCreateSchema, parseSearchRequest } from "./contracts.js";
+import { bookingCreateSchema, bookingGuestSchema, parseSearchRequest } from "./contracts.js";
 
 const validSearch = {
   destination: "Nha Trang",
@@ -8,6 +8,22 @@ const validSearch = {
   departureDate: "2026-08-12",
   rooms: [{ adults: 2, children: 0, infants: 0 }],
 };
+
+describe("guest identity and optional contacts", () => {
+  const identity = { firstName: "An", lastName: "Nguyen", country: "VN", nationality: "US" };
+  test.each([undefined, "", "   "])("accepts optional blank contacts %s and preserves different country/nationality", (contact) => {
+    expect(bookingGuestSchema.parse({ ...identity, email: contact, phoneNumber: contact })).toEqual({ ...identity, email: "", phoneNumber: "" });
+  });
+  test.each(["firstName", "lastName", "country", "nationality"])("requires %s for each guest", (field) => {
+    expect(bookingGuestSchema.safeParse({ ...identity, email: "an@example.com", phoneNumber: "0912345678", [field]: "" }).success).toBe(false);
+  });
+  test("normalizes valid country codes and rejects unknown codes or malformed provided contacts", () => {
+    expect(bookingGuestSchema.parse({ ...identity, country: " vn ", nationality: " us " })).toMatchObject(identity);
+    for (const input of [{ country: "ZZ" }, { nationality: "Vietnam" }, { email: "bad" }, { phoneNumber: "abcdefghi" }]) {
+      expect(bookingGuestSchema.safeParse({ ...identity, ...input }).success).toBe(false);
+    }
+  });
+});
 
 describe("search contract", () => {
   test("accepts normalized per-room occupancy", () => {
@@ -48,8 +64,8 @@ describe("search contract", () => {
 });
 
 describe("mixed room booking contract", () => {
-  const guestA = { firstName: "An", lastName: "Nguyen", email: "an@example.com", phoneNumber: "0912345678" };
-  const guestB = { firstName: "Binh", lastName: "Tran", email: "binh@example.com", phoneNumber: "0912345679" };
+  const guestA = { firstName: "An", lastName: "Nguyen", country: "VN", nationality: "VN", email: "an@example.com", phoneNumber: "0912345678" };
+  const guestB = { firstName: "Binh", lastName: "Tran", country: "VN", nationality: "VN", email: "binh@example.com", phoneNumber: "0912345679" };
   const booking = {
     ...validSearch, arrivalDate: "2099-08-10", departureDate: "2099-08-12",
     rooms: [validSearch.rooms[0], validSearch.rooms[0]],
@@ -91,9 +107,9 @@ describe("mixed room booking contract", () => {
 
   test("requires every searched guest and the lead to match the room contact", () => {
     expect(() => bookingCreateSchema.parse({ ...booking, roomGuests: undefined })).toThrow();
-    const roomGuests = booking.rooms.map((room, index) => Array.from({ length: room.adults + room.children + room.infants }, (_, person) => person === 0 ? booking.guests[index]! : { firstName: "Guest", lastName: "Two", email: "two@example.com", phoneNumber: "0912345680" }));
+    const roomGuests = booking.rooms.map((room, index) => Array.from({ length: room.adults + room.children + room.infants }, (_, person) => person === 0 ? booking.guests[index]! : { firstName: "Guest", lastName: "Two", country: "VN", nationality: "VN", email: "two@example.com", phoneNumber: "0912345680" }));
     expect(bookingCreateSchema.parse({ ...booking, roomGuests }).roomGuests).toHaveLength(2);
-    const sameLeadDifferentKeyOrder = { phoneNumber: booking.guests[0]!.phoneNumber, email: booking.guests[0]!.email, lastName: booking.guests[0]!.lastName, firstName: booking.guests[0]!.firstName };
+    const sameLeadDifferentKeyOrder = { country: booking.guests[0]!.country, nationality: booking.guests[0]!.nationality, phoneNumber: booking.guests[0]!.phoneNumber, email: booking.guests[0]!.email, lastName: booking.guests[0]!.lastName, firstName: booking.guests[0]!.firstName };
     expect(bookingCreateSchema.parse({ ...booking, roomGuests: [[sameLeadDifferentKeyOrder, roomGuests[0]![1]!], roomGuests[1]!] }).roomGuests).toHaveLength(2);
     expect(() => bookingCreateSchema.parse({ ...booking, roomGuests: [roomGuests[0]!.slice(0, 1), roomGuests[1]!] })).toThrow();
     expect(() => bookingCreateSchema.parse({ ...booking, roomGuests: [[{ ...roomGuests[0]![0]!, firstName: "Other" }, roomGuests[0]![1]!], roomGuests[1]!] })).toThrow();

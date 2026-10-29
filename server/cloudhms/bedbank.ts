@@ -1,4 +1,6 @@
 import type { HotelAvailabilityDto, PropertyDto, RateDetailDto, RoomAvailabilityDto, SearchRequest } from "../contracts.js";
+import { rateKey, type CancellationPolicy, type RateDetailRequest } from "../../shared/contracts.js";
+import { allotmentsOf, rateIdsOf } from "./allotments.js";
 import { AppError } from "../errors.js";
 import type { BedbankService } from "../services.js";
 import type { CloudHmsClient } from "./client.js";
@@ -9,6 +11,22 @@ const object = (value: unknown): RecordValue => value && typeof value === "objec
 const array = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
 const string = (value: unknown, fallback = ""): string => typeof value === "string" ? value : fallback;
 const number = (value: unknown, fallback = 0): number => typeof value === "number" && Number.isFinite(value) ? value : fallback;
+
+function propertyMetadata(property: RecordValue): Partial<PropertyDto> {
+  const star = number(property.star);
+  const propertyType = string(object(property.hotelType).name).trim();
+  const services = [...new Set(array(property.amenities).map((value) => string(object(value).name).trim()).filter(Boolean))];
+  return {
+    ...(Number.isInteger(star) && star >= 1 && star <= 5 ? { starRating: star } : {}),
+    ...(propertyType ? { propertyType } : {}),
+    ...(services.length > 0 ? { services } : {}),
+  };
+}
+
+function cancellationMetadata(ratePlan: RecordValue): { cancellationPolicy?: CancellationPolicy } {
+  const refundable = object(ratePlan.cancelPolicy).isRefundable;
+  return typeof refundable === "boolean" ? { cancellationPolicy: refundable ? "refundable" : "non-refundable" } : {};
+}
 
 // CloudHMS trả GUID toàn số 0 ở cấp một của `get-room-availability`, còn ID dùng được nằm lồng
 // trong `roomType` / `ratePlan`. Gửi GUID số 0 sang `get-room-detail-availability` nhận về
@@ -140,7 +158,7 @@ export class CloudHmsBedbankService implements BedbankService {
       if (!id || !name) return [];
       const firstThumbnail = object(array(item.thumbnails)[0]);
       const imageUrl = string(firstThumbnail.url);
-      return [{ id, name, city: string(item.city), ...(imageUrl ? { imageUrl } : {}) }];
+      return [{ id, name, city: string(item.city), ...(imageUrl ? { imageUrl } : {}), ...propertyMetadata(item) }];
     });
     this.catalog = { expiresAt: Date.now() + 15 * 60_000, properties, match: createPropertyMatcher(properties) };
     return this.catalog;
@@ -155,6 +173,16 @@ export class CloudHmsBedbankService implements BedbankService {
     const payload = await this.client.request<unknown>(`/common-trd/v1/pms-property/room-type?hotelId=${encodeURIComponent(propertyId)}&isPseudo=false`, { method: "GET" });
     const items = array(object(object(payload).data).items ?? object(payload).data);
     return new Map(items.map((item) => [string(object(item).id), object(item)]));
+  }
+
+  private async inventoryRates(search: SearchRequest & { propertyId: string }): Promise<RecordValue[]> {
+    const payload = await this.client.request<unknown>("/common-trd/v1/crs/booking/get-hotel-availability", { body: {
+      arrivalDate: search.arrivalDate, departureDate: search.departureDate, numberOfRoom: search.rooms.length,
+      propertyIds: [search.propertyId], distributionChannelId: this.distributionChannelId,
+      roomOccupancy: occupancyBody(search), organization: this.organizationCode,
+    } });
+    const property = array(object(object(payload).data).rates).map(object).find((entry) => string(object(entry.property).id) === search.propertyId);
+    return array(property?.rates).map(object);
   }
 
   async health() {
@@ -210,11 +238,16 @@ export class CloudHmsBedbankService implements BedbankService {
       if (!id || !catalog) return [];
       return [{
         ...catalog,
+        ...propertyMetadata(property),
         name: string(property.name, catalog.name),
         city: string(property.city, catalog.city),
         quantity: number(best.quantity),
         fromPrice: nestedAmount(best.totalAmount),
         currency: currencyOf(best.totalAmount, string(property.currencySymbol, "VND")),
+        programs: availableRates.map((rate) => ({
+          total: nestedAmount(rate.totalAmount), currency: currencyOf(rate.totalAmount, string(property.currencySymbol, "VND")),
+          ...cancellationMetadata(object(rate.ratePlan ?? object(rate.rateAvailablity).ratePlan)),
+        })),
       }];
     });
     if (hotels.length === 0) throw noAvailability(destination, search, matches);
@@ -232,7 +265,10 @@ export class CloudHmsBedbankService implements BedbankService {
     ]);
     const data = object(object(availability).data);
     const property = object(data.propertyInfo);
-    return array(data.roomAvailabilityRates).flatMap((value): RoomAvailabilityDto[] => {
+    const services = propertyMetadata(property).services;
+    const roomRates = array(data.roomAvailabilityRates);
+    const inventory = roomRates.some((rate) => allotmentsOf(rate).length === 0) ? await this.inventoryRates(search) : [];
+    const mapped = roomRates.flatMap((value): RoomAvailabilityDto[] => {
       const rate = object(value);
       if (number(rate.quantity) <= 0) return [];
       const total = nestedAmount(rate.totalAmount);
@@ -245,10 +281,11 @@ export class CloudHmsBedbankService implements BedbankService {
       const roomType = metadata.get(roomTypeId) ?? upstreamRoomType;
       const imageUrl = string(object(array(roomType.thumbnails)[0]).url);
       const tax = optionalAmount(rate.totalTaxAmount);
-      return [{
+      const base: RoomAvailabilityDto = {
         propertyId: search.propertyId,
         roomTypeId,
         roomTypeName: roomTypeLabel(roomType),
+        ...(string(roomType.roomTypeCode) ? { roomTypeCode: string(roomType.roomTypeCode) } : {}),
         ratePlanId,
         ratePlanName: string(ratePlan.name, string(ratePlan.rateCode, "Giá tiêu chuẩn")),
         quantity: number(rate.quantity), total,
@@ -257,12 +294,41 @@ export class CloudHmsBedbankService implements BedbankService {
         currency: currencyOf(rate.totalAmount, string(property.currencySymbol, "VND")),
         ...(imageUrl ? { imageUrl } : {}),
         ...(number(roomType.maxOccupancy) > 0 ? { maxOccupancy: number(roomType.maxOccupancy) } : {}),
-      }];
+        ...cancellationMetadata(ratePlan),
+        ...(services ? { services } : {}),
+      };
+      const direct = allotmentsOf(rate);
+      const matchingInventory = inventory.filter((entry) => {
+        const ids = rateIdsOf(entry);
+        return ids.roomTypeId === roomTypeId && ids.ratePlanId === ratePlanId;
+      });
+      const variants = direct.length > 0
+        ? direct.map((allotment) => ({ allotment, source: rate }))
+        : matchingInventory.flatMap((source) => allotmentsOf(source).map((allotment) => ({ allotment, source })));
+      // Không đặt tên allotment giả cho phản hồi cũ không có metadata.
+      if (variants.length === 0) return [base];
+      return variants.flatMap(({ allotment, source }) => {
+        const sourceTotal = nestedAmount(source.totalAmount);
+        const quantity = Math.min(base.quantity, number(source.quantity, base.quantity), allotment.quantity);
+        if (quantity <= 0 || sourceTotal <= 0) return [];
+        const sourceTax = optionalAmount(source.totalTaxAmount);
+        return [{ ...base, allotmentId: allotment.id, allotmentName: allotment.name, quantity,
+          total: sourceTotal, average: nestedAmount(source.averageAmount) || sourceTotal / ((Date.parse(search.departureDate) - Date.parse(search.arrivalDate)) / 86_400_000),
+          tax: sourceTax, currency: currencyOf(source.totalAmount, base.currency) }];
+      });
     });
+    const distinct = new Map<string, RoomAvailabilityDto>();
+    for (const rate of mapped) {
+      const key = rateKey(rate);
+      const previous = distinct.get(key);
+      if (previous && (previous.total !== rate.total || previous.currency !== rate.currency)) throw new AppError(503, "UPSTREAM_UNAVAILABLE", "CloudHMS trả nhiều mức giá không nhất quán cho cùng chương trình và allotment.");
+      distinct.set(key, previous ? { ...rate, quantity: Math.min(previous.quantity, rate.quantity) } : rate);
+    }
+    return [...distinct.values()];
   }
 
-  async detail(search: SearchRequest & { propertyId: string; roomTypeId: string; ratePlanId: string }): Promise<RateDetailDto> {
-    const [payload, metadata] = await Promise.all([
+  async detail(search: RateDetailRequest): Promise<RateDetailDto> {
+    const [payload, metadata, inventory] = await Promise.all([
       this.client.request<unknown>("/common-trd/v1/crs/booking/get-room-detail-availability", { body: {
         arrivalDate: search.arrivalDate, departureDate: search.departureDate, numberOfRoom: search.rooms.length,
         propertyID: search.propertyId, distributionChannelId: this.distributionChannelId,
@@ -273,16 +339,32 @@ export class CloudHmsBedbankService implements BedbankService {
       // Endpoint chi tiết chỉ trả roomTypeID, không có tên hạng phòng; tên nằm ở property
       // service. Thiếu metadata không được làm hỏng cả màn hình chi tiết giá.
       this.roomTypeMetadata(search.propertyId).catch(() => new Map<string, RecordValue>()),
+      search.allotmentId ? this.inventoryRates(search) : Promise.resolve([]),
     ]);
     const data = object(object(payload).data);
     const entries = array(data.roomAvailabilityRates).map(object);
-    const item = entries.find((entry) =>
+    const matchingEntries = entries.filter((entry) =>
       identifier(entry.roomTypeId, entry.roomTypeID, object(entry.roomType).roomTypeID) === search.roomTypeId
-      && identifier(entry.ratePlanId, entry.ratePlanID, object(entry.ratePlan).ratePlanId, object(entry.ratePlan).id) === search.ratePlanId,
+      && identifier(entry.ratePlanId, entry.ratePlanID, object(entry.ratePlan).ratePlanId, object(entry.ratePlan).id) === search.ratePlanId
+      && (!search.allotmentId || allotmentsOf(entry).length === 0 || allotmentsOf(entry).some((allotment) => allotment.id === search.allotmentId)),
     );
+    const eligible = search.allotmentId ? inventory.flatMap((entry) => {
+      const ids = rateIdsOf(entry);
+      if (ids.roomTypeId !== search.roomTypeId || ids.ratePlanId !== search.ratePlanId) return [];
+      const allotment = allotmentsOf(entry).find((candidate) => candidate.id === search.allotmentId && candidate.quantity > 0);
+      return allotment && number(entry.quantity) > 0 ? [{ entry, allotment }] : [];
+    }) : [];
+    const item = matchingEntries.find((candidate) => !search.allotmentId || eligible.some(({ entry }) => nestedAmount(entry.totalAmount) === nestedAmount(candidate.totalAmount) && currencyOf(entry.totalAmount) === currencyOf(candidate.totalAmount))) ?? matchingEntries[0];
     // Upstream trả quantity = 0 kể cả khi rate vẫn bán được, nên hết phòng chỉ có thể
     // suy ra từ việc không còn bản ghi nào.
     if (!item) throw new AppError(404, "NO_AVAILABILITY", "Hạng phòng này không còn khả dụng");
+    let selectedAllotment: { allotmentId: string; allotmentName: string; quantity: number } | undefined;
+    if (search.allotmentId) {
+      const match = eligible.find(({ entry }) => nestedAmount(entry.totalAmount) === nestedAmount(item.totalAmount) && currencyOf(entry.totalAmount) === currencyOf(item.totalAmount));
+      if (!eligible.length) throw new AppError(409, "NO_AVAILABILITY", "Allotment đã chọn không còn khả dụng. Vui lòng chọn lại phòng.");
+      if (!match) throw new AppError(409, "PRICE_CHANGED", "Giá chi tiết không khớp với allotment đã chọn. Vui lòng tìm lại phòng và xem giá mới.");
+      selectedAllotment = { allotmentId: match.allotment.id, allotmentName: match.allotment.name, quantity: Math.min(number(match.entry.quantity), match.allotment.quantity) };
+    }
     const ratePlan = object(item.ratePlan);
     const upstreamRoomType = object(item.roomType);
     const roomType = metadata.get(search.roomTypeId) ?? upstreamRoomType;
@@ -304,9 +386,11 @@ export class CloudHmsBedbankService implements BedbankService {
       propertyId: search.propertyId,
       roomTypeId: search.roomTypeId,
       roomTypeName: roomTypeLabel(roomType),
+      ...(string(roomType.roomTypeCode) ? { roomTypeCode: string(roomType.roomTypeCode) } : {}),
       ratePlanId: search.ratePlanId,
       ratePlanName: string(ratePlan.name, string(ratePlan.rateCode, "Giá tiêu chuẩn")),
       quantity: number(item.quantity),
+      ...selectedAllotment,
       total: nestedAmount(item.totalAmount),
       average: nestedAmount(item.averageAmount),
       ...(tax === undefined ? {} : { tax }),

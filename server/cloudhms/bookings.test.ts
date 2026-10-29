@@ -13,8 +13,8 @@ const actor: Profile = { userId: "staff", email: "staff@example.com", displayNam
 const input: BookingCreateRequest = {
   requestId: "22222222-2222-4222-8222-222222222222", destination: "Phú Quốc", arrivalDate: "2026-06-01", departureDate: "2026-06-03",
   propertyId: "c67377fc-d81d-4208-add9-47e32b69f998", roomTypeId: "5051e26c-e710-4028-90ae-ad929b0309e7", ratePlanId: "1604924a-a9c1-4197-b013-2e61d6a193d0",
-  rooms: [{ adults: 2, children: 1, infants: 0 }], guests: [{ firstName: "An", lastName: "Nguyen", email: "guest@example.com", phoneNumber: "0912345678" }],
-  roomGuests: [[{ firstName: "An", lastName: "Nguyen", email: "guest@example.com", phoneNumber: "0912345678" }, { firstName: "Binh", lastName: "Tran", email: "binh@example.com", phoneNumber: "0912345679" }, { firstName: "Chi", lastName: "Le", email: "chi@example.com", phoneNumber: "0912345680" }]],
+  rooms: [{ adults: 2, children: 1, infants: 0 }], guests: [{ firstName: "An", lastName: "Nguyen", country: "VN", nationality: "VN", email: "guest@example.com", phoneNumber: "0912345678" }],
+  roomGuests: [[{ firstName: "An", lastName: "Nguyen", country: "VN", nationality: "VN", email: "guest@example.com", phoneNumber: "0912345678" }, { firstName: "Binh", lastName: "Tran", country: "VN", nationality: "VN", email: "binh@example.com", phoneNumber: "0912345679" }, { firstName: "Chi", lastName: "Le", country: "VN", nationality: "VN", email: "chi@example.com", phoneNumber: "0912345680" }]],
   expectedTotal: 1800000, currency: "VND", acceptedPolicies: true, notes: "Late arrival",
 };
 function setup() {
@@ -28,6 +28,67 @@ function setup() {
   return { request, gateway, bedbank };
 }
 describe("CiHMS booking contract", () => {
+  test("keeps the same guests in one reservation with different room codes on successive nights", async () => {
+    const { gateway, bedbank, request } = setup();
+    const available = structuredClone(inventory);
+    const first = available.data.rates[0]!.rates[0]!;
+    const second = structuredClone(first);
+    second.roomTypeID = "room-two";
+    second.rateAvailablity.roomTypeId = "room-two";
+    second.rateAvailablity.roomTypeCode = "SUITE";
+    second.rateAvailablity.allotments = [{ ...second.rateAvailablity.allotments[0]!, allotmentId: "all-suite", name: "Suite agent" }];
+    available.data.rates[0]!.rates.push(second);
+    request.mockResolvedValue(available);
+    vi.mocked(bedbank.detail).mockImplementation(async (search) => {
+      const suite = search.roomTypeId === "room-two";
+      const amount = suite ? 1500000 : 900000;
+      return { propertyId: input.propertyId, roomTypeId: search.roomTypeId, ratePlanId: search.ratePlanId, roomTypeName: suite ? "Suite" : "Standard King", ratePlanName: "Rate", quantity: 0, maxOccupancy: 4, total: amount, average: amount, currency: "VND", dailyRates: [{ date: search.arrivalDate, amount }], policies: [] };
+    });
+    const prepared = await gateway.prepare({ ...input, allotmentId: first.rateAvailablity.allotments[0]!.allotmentId, expectedTotal: 2400000, roomStaySelections: [[
+      { roomTypeId: input.roomTypeId, ratePlanId: input.ratePlanId, allotmentId: first.rateAvailablity.allotments[0]!.allotmentId, arrivalDate: input.arrivalDate, departureDate: "2026-06-02", expectedUnitTotal: 900000 },
+      { roomTypeId: "room-two", ratePlanId: input.ratePlanId, allotmentId: "all-suite", arrivalDate: "2026-06-02", departureDate: input.departureDate, expectedUnitTotal: 1500000 },
+    ]] }, actor, "ref");
+    expect(prepared.body).toMatchObject({ arrivalDate: input.arrivalDate, departureDate: input.departureDate, reservations: [{ totalAmount: { amount: 2400000 }, roomRates: [
+      { stayDate: "2026-06-01", roomTypeRefID: input.roomTypeId, roomTypeCode: "BKSDG" },
+      { stayDate: "2026-06-02", roomTypeRefID: "room-two", roomTypeCode: "SUITE", allotmentId: "all-suite" },
+    ] }] });
+    const reservations = (prepared.body as { reservations: { profiles: { profileType: string; email?: string }[] }[] }).reservations;
+    expect(reservations).toHaveLength(1);
+    expect(reservations[0]!.profiles.filter((profile) => profile.profileType === "Guest").map((profile) => profile.email)).toEqual(input.roomGuests[0]!.map((guest) => guest.email));
+    expect(prepared.roomLines).toHaveLength(2);
+  });
+
+  test("uses the exact selected allotment instead of the first eligible allotment", async () => {
+    const { gateway } = setup();
+    const selected = inventory.data.rates[0]!.rates[0]!.rateAvailablity.allotments[1]!;
+    const prepared = await gateway.prepare({ ...input, allotmentId: selected.allotmentId }, actor, "ref");
+    expect(prepared.body).toMatchObject({ reservations: [{ roomRates: [{ allotmentId: selected.allotmentId }, { allotmentId: selected.allotmentId }] }] });
+    expect(prepared.roomLines?.[0]).toMatchObject({ allotmentId: selected.allotmentId, allotmentName: selected.name });
+  });
+
+  test("rejects an unavailable selected allotment without substituting another agency's allotment", async () => {
+    const { gateway, request } = setup();
+    const available = structuredClone(inventory);
+    const selected = available.data.rates[0]!.rates[0]!.rateAvailablity.allotments[1]!;
+    selected.quantity = 0;
+    request.mockResolvedValue(available);
+    await expect(gateway.prepare({ ...input, allotmentId: selected.allotmentId }, actor, "ref")).rejects.toMatchObject({ code: "NO_AVAILABILITY" });
+    await expect(gateway.prepare({ ...input, allotmentId: "unknown-agency" }, actor, "ref")).rejects.toMatchObject({ code: "NO_AVAILABILITY" });
+  });
+
+  test("keeps two selected allotments distinct when room and rate-plan IDs are identical", async () => {
+    const { gateway, request } = setup();
+    const available = structuredClone(inventory);
+    const rate = available.data.rates[0]!.rates[0]!;
+    rate.quantity = 2;
+    rate.rateAvailablity.allotments.forEach((allotment) => { allotment.quantity = 1; });
+    request.mockResolvedValue(available);
+    const allotments = rate.rateAvailablity.allotments;
+    const prepared = await gateway.prepare({ ...input, rooms: [input.rooms[0]!, input.rooms[0]!], guests: [input.guests[0]!, input.guests[0]!], roomGuests: [input.roomGuests[0]!, input.roomGuests[0]!], expectedTotal: 3600000,
+      roomSelections: allotments.map((allotment) => ({ roomTypeId: input.roomTypeId, ratePlanId: input.ratePlanId, allotmentId: allotment.allotmentId, expectedUnitTotal: 1800000 })) }, actor, "ref");
+    expect(prepared.body).toMatchObject({ reservations: allotments.map((allotment) => ({ roomRates: [{ allotmentId: allotment.allotmentId }, { allotmentId: allotment.allotmentId }] })) });
+  });
+
   test("prepares daily room rates using real allotments and current detail pricing", async () => {
     const { gateway } = setup();
     const prepared = await gateway.prepare(input, actor, "NT-reference");
@@ -48,11 +109,23 @@ describe("CiHMS booking contract", () => {
   test("sends every named occupant as a Guest profile for the room", async () => {
     const { gateway } = setup();
     const roomGuests = [input.guests[0]!,
-      { firstName: "Binh", lastName: "Tran", email: "binh@example.com", phoneNumber: "0912345679" },
-      { firstName: "Chi", lastName: "Le", email: "chi@example.com", phoneNumber: "0912345680" }];
+      { firstName: "Binh", lastName: "Tran", country: "VN", nationality: "VN", email: "binh@example.com", phoneNumber: "0912345679" },
+      { firstName: "Chi", lastName: "Le", country: "VN", nationality: "VN", email: "chi@example.com", phoneNumber: "0912345680" }];
     const prepared = await gateway.prepare({ ...input, roomGuests: [roomGuests] }, actor, "ref");
     const profiles = (prepared.body as { reservations: { profiles: { profileType: string; firstName: string }[] }[] }).reservations[0]!.profiles;
     expect(profiles.filter((profile) => profile.profileType === "Guest").map((profile) => profile.firstName)).toEqual(["An", "Binh", "Chi"]);
+  });
+  test("sends guest country/nationality and omits empty contact/search fields", async () => {
+    const { gateway } = setup();
+    const guest = { firstName: "An", lastName: "Nguyen", country: "VN", nationality: "US", email: "", phoneNumber: "" };
+    const roomGuests = [guest, { ...guest, firstName: "Binh", email: "binh@example.com" }, { ...guest, firstName: "Chi", phoneNumber: "0912345678" }];
+    const prepared = await gateway.prepare({ ...input, guests: [guest], roomGuests: [roomGuests] }, actor, "ref");
+    const profiles = (prepared.body as { reservations: { profiles: Record<string, unknown>[] }[] }).reservations[0]!.profiles.filter((profile) => profile.profileType === "Guest");
+    expect(profiles[0]).toEqual({ firstName: "An", lastName: "Nguyen", country: "VN", nationality: "US", profileRefID: "", profileType: "Guest" });
+    expect(profiles[1]).toMatchObject({ country: "VN", nationality: "US", email: "binh@example.com", primarySearchValues: { email: "binh@example.com" } });
+    expect(profiles[1]).not.toHaveProperty("phoneNumber");
+    expect(profiles[2]).toMatchObject({ phoneNumber: "0912345678", primarySearchValues: { phoneNumber: "0912345678" } });
+    expect(profiles[2]).not.toHaveProperty("email");
   });
   test("refuses an unrelated room rate instead of taking the first returned rate", async () => {
     const { gateway } = setup();

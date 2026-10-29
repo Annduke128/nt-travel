@@ -23,7 +23,7 @@ Trình duyệt gọi BFF `/api`; token CiHMS và service key Supabase chỉ có 
 | `CLOUDHMS_TRAVEL_AGENT_PROFILE_ID` | profileRefID của NT_TRAVEL do CiHMS cấp; mặc định `5ad529d3-6b9e-4f3c-8aab-0eed61331aac`. Để trống thì CiHMS chỉ lưu tên, không liên kết profile |
 
 Không dùng identifier mẫu trong collection làm cấu hình live. Allotment, room type và rate plan
-được lấy từ availability đúng property/channel; không hardcode hoặc nhận allotment từ trình duyệt.
+được lấy từ availability đúng property/channel. Trình duyệt gửi mã allotment đã chọn; server xác minh lại mã này trong availability của đúng phòng/chương trình trước khi đặt, không tự chuyển sang allotment khác khi hết phòng.
 
 ## Integration Flow & API Call Order
 
@@ -84,17 +84,26 @@ bao giờ lệch tập khớp. Quy tắc so khớp, đặt ra theo đúng dữ l
 - `POST /common-trd/v1/crs/booking/get-room-detail-availability`
 
 Occupancy là số khách **mỗi phòng**, không cộng dồn. Không dùng GUID toàn số 0 làm ID.
-UI tìm khách sạn và liệt kê hạng phòng theo giá/tồn của một phòng để có thể ghép nhiều hạng cho đoàn. Backend kiểm tra lại đúng từng cặp room/rate, allotment không bị tính trùng giữa các rate plan, đủ ngày và giá từng phòng trước khi tạo.
+UI tìm khách sạn và mở từng hạng phòng thành bảng so sánh: allotment là các cột, chương trình giá là các dòng (ghép theo ratePlanId). Mỗi ô giữ giá và tồn phòng của đúng allotment; chương trình không có giá ở allotment nào thì để trống. Mỗi lựa chọn được phân biệt bằng `(roomTypeId, allotmentId, ratePlanId)`, giữ nguyên qua xem chính sách, đổi số khách, lưu nháp và đặt phòng. Availability của một phòng dùng để ghép nhiều hạng cho đoàn. Backend kiểm tra lại đúng allotment, không tính trùng tồn giữa các rate plan, đủ ngày và giá từng phòng trước khi tạo. Phản hồi cũ thiếu allotment giữ luồng xem giá theo phòng/chương trình; không dựng tên allotment giả. Các cột được dựng từ dữ liệu API trả về; phân quyền allotment riêng cho từng tài khoản chưa triển khai.
 Detail được lấy cho một phòng; tổng booking là tổng giá từng phòng đã chọn. Giá lẻ theo hạng hiện trước tổng. Thiếu thuế được hiển thị là chưa có dữ liệu.
+
+Trong màn cấu hình, mỗi tab giữ một nhóm khách xuyên suốt kỳ lưu trú. Người dùng có thể đổi mã phòng/dịch vụ và chương trình/allotment cho từng đêm bằng các mã từ availability của đúng ngày đó. Các đêm liền nhau có cùng mã được gộp thành một khoảng để báo giá lại; đổi mã hoặc số khách báo giá lại toàn bộ các khoảng của tab đó. Sức chứa của nhóm là giới hạn thấp nhất trong các mã đã chọn. Bản nháp lưu cả lịch mã phòng và thông tin khách.
+
+Ngày nhận/trả phòng được chỉnh trong thanh bên trái có thể thu gọn và áp dụng chung cho mọi phòng; trên màn hình nhỏ, thanh này nằm phía trên các tab. Thu gọn giữ nguyên ngày đang sửa và hiển thị dấu nhắc nếu chưa áp dụng. Dời ngày giữ thứ tự các mã theo đêm; rút ngắn bỏ các đêm cuối, kéo dài dùng mã của đêm cuối cho các đêm thêm. Chỉ cập nhật ngày và giá sau khi mọi khoảng của mọi phòng được kiểm tra lại availability, sức chứa, tồn chung theo ngày và giá chi tiết; lỗi ở bất kỳ phòng nào giữ nguyên toàn bộ kỳ cũ. Thông tin khách được giữ, đồng ý chính sách phải xác nhận lại; ngày mới cũng được lưu trong bản nháp. Khi còn thay đổi ngày chưa áp dụng, không thể xác nhận hoặc tạo đơn.
 
 ## Step 4 — Create & Confirm a Booking
 
-1. `POST /api/bookings`: kiểm tra ngày, 1–20 phòng, tối đa 30 đêm, hạng/giá dự kiến từng phòng, đủ thông tin mọi khách, đồng ý chính sách. Một booking chỉ có một property và một khoảng ngày. Các chặng khác nhau có request ID riêng và cùng `journeyId`; ứng dụng hiển thị mã hành trình `NT-J-{journeyId}`.
+Mỗi khách bắt buộc có họ, tên, quốc gia và quốc tịch. Hai trường `country`/`nationality` được chọn độc lập từ danh sách ISO 3166-1 alpha-2 (249 mã, tên hiển thị tiếng Việt) và gửi dưới dạng mã hai ký tự theo collection CiHMS. Email/SĐT không bắt buộc: có thể bỏ qua hoặc để trống; nếu nhập thì vẫn kiểm tra định dạng. Máy chủ chuẩn hóa liên hệ thiếu/trống về chuỗi rỗng để đối chiếu khách đại diện nhất quán. Khi gửi profile Guest sang CiHMS, chỉ đưa email/SĐT và `primarySearchValues` nếu có dữ liệu liên hệ. Bản nháp cũ giữ họ tên và liên hệ, nhưng không tự đoán quốc gia/quốc tịch; phòng chỉ hoàn tất sau khi bổ sung các trường bắt buộc. Việc gửi country/nationality và bỏ liên hệ trống đã có contract test; luồng tạo đơn không có liên hệ được kiểm chứng trên mock local.
+
+Sau “Xác nhận phòng”, phần thông tin khách hiển thị các tab phòng nằm ngang với số khách đã điền đủ; chữ dùng màu thường khi còn thiếu và chuyển xanh lá khi đã đủ mọi khách trong phòng. Bấm tab mở phần nhập xổ xuống ngay bên dưới, bấm lại để thu gọn hoặc chọn tab khác để chuyển phòng. Chỉ một phòng mở tại một thời điểm; dữ liệu đang nhập vẫn được lưu nháp khi thu gọn, chuyển phòng hoặc tải lại trang. Phần nhập nằm trong trang, không dùng popup, lớp nền tối hay khóa cuộn/điều hướng bàn phím. Form nhập phòng và form tạo booking là hai form riêng; “Lưu và đóng” chỉ thu gọn phòng sau khi kiểm tra dữ liệu, không tạo đơn. Trước khi tạo đơn, giao diện kiểm tra mọi khách kể cả các phòng đang đóng và mở/focus đúng trường đầu tiên còn thiếu, kể cả khi phòng đó đã mở sẵn. Phần cấu hình vẫn ở phía trên để sửa số khách/ngày/mã phòng; chính sách ở phần tổng hợp có thể mở rộng khi cần xem.
+
+1. `POST /api/bookings`: kiểm tra ngày, 1–20 phòng, tối đa 30 đêm, hạng/giá dự kiến từng phòng, đủ thông tin mọi khách, đồng ý chính sách. Một booking chỉ có một property và một khoảng ngày. Giao diện không còn gom các booking khách sạn/ngày khác nhau thành “chặng”. Các trường `journeyId`/`journeyLeg` được giữ ở backend để đọc bản ghi cũ; dịch vụ bổ sung theo ngày trong từng phòng là dữ liệu riêng, không dùng hai trường này. Bản nháp được mở từ “Đặt phòng của tôi”, không hiển thị ở thanh tìm kiếm.
 2. Lưu request ID và fingerprint vào `public.bookings` trước lệnh ghi. Live dùng Supabase với quyền BFF;
    cùng request ID chỉ được tạo một lần, kể cả khi các worker nhận request đồng thời.
 3. `POST /common-trd/v1/crs/booking`: `distributionChannel` (khác tên trường ở availability),
    `requestorId`, `sourceCode`, `reservations[]` với Booker/TravelAgent/BookingClient (`BookingPortal`)/các Guest trong phòng, totalAmount theo giá từng phòng, roomOccupancy,
    referenceIds và roomRates từng ngày lấy từ dữ liệu server.
+   Khi có `roomStaySelections`, mỗi nhóm khách có một danh sách khoảng ngày liên tục, không trùng hoặc thiếu đêm. Backend kiểm tra tổng giá, báo giá lại từng khoảng, kiểm tra tồn phòng và allotment theo từng ngày. Vẫn tạo một reservation cho mỗi nhóm khách; `roomRates[]` mang đúng mã phòng, chương trình và allotment của từng đêm. Thông tin khách không nhân bản thành các nhóm mới khi đổi mã. Các trường hợp có nhiều mã theo ngày đã được kiểm chứng bằng contract test và luồng mock local; chưa tạo đơn live để UAT việc chuyển mã phòng.
 4. Đọc `data.reservations[].reservationID`, `confirmationNumber`, `status`. `Prospect` là chờ xác nhận.
 5. `POST /common-trd/v1/crs/booking/{id}/guarantee-methods`: hiển thị toàn bộ khoản theo ngày,
    tổng bảo đảm và hạn. Collection lặp cùng ID qua nhiều ngày; batch commit gửi các ID duy nhất.
@@ -109,7 +118,7 @@ Detail được lấy cho một phòng; tổng booking là tổng giá từng ph
 ## Step 5 — Update / Cancel / Search
 
 Đã triển khai `GET /api/bookings` và `GET /api/bookings/{id}` để xem lại trạng thái lưu tại NT Travel,
-giới hạn theo nhân viên đăng nhập. Danh sách là 100 yêu cầu gần nhất; tìm mã, khách sạn và tên khách trên danh sách đó. `GET /api/journeys/:id/bookings` trả toàn bộ chặng đã lưu của một hành trình, không phụ thuộc giới hạn 100 của danh sách. Unique index `(actor_id, journeyId, journeyLeg)` ngăn tạo trùng số chặng khi hai phiên cùng thao tác.
+giới hạn theo nhân viên đăng nhập. Danh sách là 100 yêu cầu gần nhất; tìm mã, khách sạn và tên khách trên danh sách đó. `GET /api/journeys/:id/bookings` và unique index `(actor_id, journeyId, journeyLeg)` vẫn tương thích với dữ liệu cũ; giao diện hiện không gọi hoặc hiển thị luồng này.
 Đây là trạng thái lần cuối NT Travel nhận được; không tự đồng bộ thay đổi ngoài ứng dụng.
 
 Collection có các API dưới đây, **chưa triển khai trong giao diện/backend**:

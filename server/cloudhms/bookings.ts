@@ -1,9 +1,11 @@
-import type { BookingCreateRequest, BookingGuarantee, BookingReservation, Profile, RateDetailDto } from "../../shared/contracts.js";
+import { rateKey, type BookingCreateRequest, type BookingGuarantee, type BookingReservation, type Profile, type RateDetailDto, type RateIdentity } from "../../shared/contracts.js";
+import { allotmentsOf } from "./allotments.js";
 import type { BookingGateway, PreparedBooking } from "../bookings/service.js";
 import type { BedbankService } from "../services.js";
 import type { CloudHmsClient } from "./client.js";
 import { AppError } from "../errors.js";
 import { rateDetailSchema } from "../contracts.js";
+import { prepareRoomStayPlan } from "../bookings/roomStays.js";
 type BookingConfig = { organizationCode: string; distributionChannelId: string; requestorId: string; sourceCode: string; travelAgentName: string; travelAgentProfileId: string };
 type Row = Record<string, unknown>;
 const object = (value: unknown): Row => value && typeof value === "object" && !Array.isArray(value) ? value as Row : {};
@@ -69,15 +71,25 @@ export class CloudHmsBookingGateway implements BookingGateway {
   readonly mode = "live" as const;
   constructor(private client: CloudHmsClient, private bedbank: BedbankService, private config: BookingConfig) {}
   async prepare(input: BookingCreateRequest, actor: Profile, reference: string): Promise<PreparedBooking> {
-    const selections = input.roomSelections ?? input.rooms.map(() => ({ roomTypeId: input.roomTypeId, ratePlanId: input.ratePlanId, expectedUnitTotal: input.expectedTotal / input.rooms.length }));
-    const keyOf = (selection: { roomTypeId: string; ratePlanId: string }, room: typeof input.rooms[number]) => `${selection.roomTypeId}:${selection.ratePlanId}:${room.adults}:${room.children}:${room.infants}`;
-    const grouped = new Map<string, { roomTypeId: string; ratePlanId: string; count: number; room: typeof input.rooms[number] }>();
+    if (input.roomStaySelections) return prepareRoomStayPlan(input, (single) => this.prepare(single, actor, reference), (parts) => {
+      type Body = { reservations: { totalAmount: { amount: number; currencyCode: string }; roomRates: { stayDate: string }[]; [key: string]: unknown }[]; [key: string]: unknown };
+      const firstBody = parts[0]!.prepared.body as Body;
+      return { ...firstBody, arrivalDate: input.arrivalDate, departureDate: input.departureDate, reservations: input.rooms.map((_, roomIndex) => {
+        const selected = parts.filter((part) => part.roomIndex === roomIndex);
+        const reservation = (selected[0]!.prepared.body as Body).reservations[0]!;
+        return { ...reservation, totalAmount: { amount: selected.reduce((sum, part) => sum + part.prepared.total, 0), currencyCode: input.currency },
+          roomRates: selected.flatMap((part) => (part.prepared.body as Body).reservations[0]!.roomRates).sort((a, b) => a.stayDate.localeCompare(b.stayDate)) };
+      }) };
+    });
+    const selections = input.roomSelections ?? input.rooms.map(() => ({ roomTypeId: input.roomTypeId, ratePlanId: input.ratePlanId, allotmentId: input.allotmentId, expectedUnitTotal: input.expectedTotal / input.rooms.length }));
+    const keyOf = (selection: RateIdentity, room: typeof input.rooms[number]) => JSON.stringify([rateKey(selection), room.adults, room.children, room.infants]);
+    const grouped = new Map<string, RateIdentity & { count: number; room: typeof input.rooms[number] }>();
     for (const [index, selection] of selections.entries()) {
       const room = input.rooms[index]!;
       const key = keyOf(selection, room);
       const current = grouped.get(key);
       if (current) current.count += 1;
-      else grouped.set(key, { roomTypeId: selection.roomTypeId, ratePlanId: selection.ratePlanId, count: 1, room });
+      else grouped.set(key, { roomTypeId: selection.roomTypeId, ratePlanId: selection.ratePlanId, allotmentId: selection.allotmentId, count: 1, room });
     }
     const occupancyOf = (room: typeof input.rooms[number]) => ({ numberOfAdult: room.adults, otherOccupancies: [
       { otherOccupancyRefID: "child", otherOccupancyRefCode: "child", quantity: room.children },
@@ -89,11 +101,11 @@ export class CloudHmsBookingGateway implements BookingGateway {
         propertyIds: [input.propertyId], distributionChannelId: this.config.distributionChannelId,
         roomOccupancy: occupancyOf(selection.room), organization: this.config.organizationCode,
       } }),
-      this.bedbank.detail({ ...input, rooms: [selection.room], roomTypeId: selection.roomTypeId, ratePlanId: selection.ratePlanId }),
+      this.bedbank.detail({ ...input, rooms: [selection.room], roomTypeId: selection.roomTypeId, ratePlanId: selection.ratePlanId, allotmentId: selection.allotmentId }),
     ])));
     const nights = Math.round((Date.parse(input.departureDate) - Date.parse(input.arrivalDate)) / 86_400_000);
     const dates = Array.from({ length: nights }, (_, index) => new Date(Date.parse(input.arrivalDate) + index * 86_400_000).toISOString().slice(0, 10));
-    const checked = new Map<string, { detail: RateDetailDto; roomRates: { stayDate: string; roomTypeCode: string; roomTypeName: string; roomTypeRefID: string; ratePlanCode: string; ratePlanRefID: string; allotmentId: string }[] }>();
+    const checked = new Map<string, { detail: RateDetailDto; quantity: number; roomRates: { stayDate: string; roomTypeCode: string; roomTypeName: string; roomTypeRefID: string; ratePlanCode: string; ratePlanRefID: string; allotmentId: string }[] }>();
     const allotmentUsed = new Map<string, number>();
     const allotmentLimit = new Map<string, number>();
     for (const [index, selection] of [...grouped.values()].entries()) {
@@ -104,26 +116,28 @@ export class CloudHmsBookingGateway implements BookingGateway {
       const detail = parsed.data;
       const rate = array(property?.rates).map(object).find((item) => {
         const nested = object(item.rateAvailablity);
-        return identifier(item.roomTypeID, nested.roomTypeId) === selection.roomTypeId && identifier(item.ratePlanID, nested.ratePlanId) === selection.ratePlanId;
+        return identifier(item.roomTypeID, nested.roomTypeId) === selection.roomTypeId && identifier(item.ratePlanID, nested.ratePlanId) === selection.ratePlanId
+          && (!selection.allotmentId || allotmentsOf(item).some((allotment) => allotment.id === selection.allotmentId));
       });
       if (!rate || typeof rate.quantity !== "number" || rate.quantity < selection.count) throw new AppError(409, "NO_AVAILABILITY", "Không còn đủ phòng cho yêu cầu này. Vui lòng tìm lại phòng.");
       if (detail.propertyId !== input.propertyId || detail.roomTypeId !== selection.roomTypeId || detail.ratePlanId !== selection.ratePlanId) throw invalid();
+      if (selection.allotmentId && detail.allotmentId && detail.allotmentId !== selection.allotmentId) throw invalid();
       if (detail.maxOccupancy && selection.room.adults + selection.room.children + selection.room.infants > detail.maxOccupancy) throw new AppError(409, "NO_AVAILABILITY", "Số khách vượt sức chứa của hạng phòng. Vui lòng chọn lại phòng.");
       const nested = object(rate.rateAvailablity);
-      const allotment = array(nested.allotments).map(object).find((item) => {
-        const id = identifier(item.allotmentId, item.id);
+      const allotment = allotmentsOf(rate).find((item) => {
+        const id = item.id;
         const quantity = item.quantity;
-        return id && typeof quantity === "number" && (allotmentUsed.get(id) ?? 0) + selection.count <= Math.min(allotmentLimit.get(id) ?? quantity, quantity);
+        return (!selection.allotmentId || id === selection.allotmentId) && (allotmentUsed.get(id) ?? 0) + selection.count <= Math.min(allotmentLimit.get(id) ?? quantity, quantity);
       });
       const roomTypeCode = text(nested.roomTypeCode);
       const ratePlanCode = text(nested.ratePlanCode) || text(object(nested.ratePlan).rateCode);
       if (!allotment) throw new AppError(409, "NO_AVAILABILITY", "Không còn đủ phòng cho yêu cầu này. Vui lòng tìm lại phòng.");
       if (!roomTypeCode || !ratePlanCode || detail.total <= 0) throw invalid();
-      const allotmentId = identifier(allotment.allotmentId, allotment.id);
+      const allotmentId = allotment.id;
       allotmentUsed.set(allotmentId, (allotmentUsed.get(allotmentId) ?? 0) + selection.count);
       allotmentLimit.set(allotmentId, Math.min(allotmentLimit.get(allotmentId) ?? Number(allotment.quantity), Number(allotment.quantity)));
       if (detail.dailyRates.length !== nights || dates.some((date) => !detail.dailyRates.some((item) => item.date === date))) throw invalid();
-      checked.set(keyOf(selection, selection.room), { detail,
+      checked.set(keyOf(selection, selection.room), { detail: { ...detail, allotmentId, allotmentName: allotment.name }, quantity: Math.min(Number(rate.quantity), allotment.quantity),
         roomRates: dates.map((stayDate) => ({ stayDate, roomTypeCode, roomTypeName: detail.roomTypeName,
           roomTypeRefID: selection.roomTypeId, ratePlanCode, ratePlanRefID: selection.ratePlanId, allotmentId })) });
     }
@@ -142,17 +156,21 @@ export class CloudHmsBookingGateway implements BookingGateway {
           { firstName: actor.displayName, lastName: "", email: actor.email, profileRefID: "", profileType: "Booker" },
           { firstName: this.config.travelAgentName, profileRefID: this.config.travelAgentProfileId, profileType: "TravelAgent" },
           { profileRefID: "BookingPortal", profileType: "BookingClient" },
-          ...input.roomGuests[index]!.map((occupant) => ({ ...occupant, profileRefID: "", profileType: "Guest", primarySearchValues: { email: occupant.email, phoneNumber: occupant.phoneNumber } })),
+          ...input.roomGuests[index]!.map(({ email, phoneNumber, ...identity }) => {
+            const contacts = { ...(email?.trim() ? { email: email.trim() } : {}), ...(phoneNumber?.trim() ? { phoneNumber: phoneNumber.trim() } : {}) };
+            return { ...identity, ...contacts, profileRefID: "", profileType: "Guest", ...(Object.keys(contacts).length ? { primarySearchValues: contacts } : {}) };
+          }),
         ],
         isRoomRatesSpecified: true, roomRates: checked.get(keyOf(selections[index]!, input.rooms[index]!))!.roomRates, isPackagesSpecified: false, packages: [],
       })),
     };
     const first = checked.get(keyOf(selections[0]!, input.rooms[0]!))!.detail;
     const firstProperty = array(dataOf(quotes[0]![0]).rates).map(object).find((item) => identifier(object(item.property).id) === input.propertyId);
-    const distinctRooms = new Set(selections.map((selection) => `${selection.roomTypeId}:${selection.ratePlanId}`)).size;
+    const distinctRooms = new Set(selections.map(rateKey)).size;
     return { propertyName: text(object(firstProperty?.property).name), roomTypeName: distinctRooms === 1 ? first.roomTypeName : "Nhiều hạng phòng", ratePlanName: distinctRooms === 1 ? first.ratePlanName : "Nhiều gói giá",
       total: selections.reduce((sum, selection, index) => sum + checked.get(keyOf(selection, input.rooms[index]!))!.detail.total, 0), currency: input.currency, body,
-      roomLines: selections.map((selection, index) => { const item = checked.get(keyOf(selection, input.rooms[index]!))!.detail; return { roomTypeId: selection.roomTypeId, roomTypeName: item.roomTypeName, ratePlanId: selection.ratePlanId, ratePlanName: item.ratePlanName, unitTotal: item.total }; }) };
+      roomLines: selections.map((selection, index) => { const item = checked.get(keyOf(selection, input.rooms[index]!))!.detail; return { roomTypeId: selection.roomTypeId, roomTypeName: item.roomTypeName, ratePlanId: selection.ratePlanId, ratePlanName: item.ratePlanName, unitTotal: item.total, allotmentId: item.allotmentId, allotmentName: item.allotmentName }; }),
+      availabilityChecks: selections.map((selection, index) => { const checkedRate = checked.get(keyOf(selection, input.rooms[index]!))!; return { ...selection, allotmentId: checkedRate.detail.allotmentId, arrivalDate: input.arrivalDate, departureDate: input.departureDate, quantity: checkedRate.quantity }; }) };
   }
   async create(prepared: PreparedBooking, reference: string): Promise<BookingReservation[]> {
     return parseBookingReservations(await this.client.request("/common-trd/v1/crs/booking", { body: prepared.body, retry: false, correlationId: reference }), false);
