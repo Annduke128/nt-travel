@@ -45,6 +45,39 @@ describe("NT Travel bedbank v1", () => {
     return user;
   }
 
+  test.each([1, 2, 5])("shows nightly hotel and allotment prices for a %i-night stay while preserving the selected total", async (nights) => {
+    const nightly = 2659475;
+    const total = nightly * nights;
+    const rate = { propertyId: "p1", roomTypeId: "r1", roomTypeName: "Deluxe Ocean", ratePlanId: "breakfast", ratePlanName: "Bao gồm bữa sáng", allotmentId: "agent", allotmentName: "Agent", quantity: 4, total, average: 0, currency: "VND" };
+    stubEndpoint("/api/availability/hotels", { data: [{ id: "p1", name: "Vinpearl Beachfront Nha Trang", city: "Nha Trang", quantity: 4, fromPrice: total, currency: "VND", programs: [{ total, currency: "VND" }] }] }, 200);
+    stubEndpoint("/api/availability/rooms", { data: [rate] }, 200);
+    stubEndpoint("/api/availability/detail", { data: { ...rate, dailyRates: [], policies: [] } }, 200);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.type(await screen.findByLabelText("Điểm đến hoặc khách sạn"), "Nha Trang");
+    fireEvent.change(screen.getByLabelText("Ngày nhận phòng"), { target: { value: "2099-11-25" } });
+    const departure = new Date(Date.UTC(2099, 10, 25 + nights)).toISOString().slice(0, 10);
+    fireEvent.change(screen.getByLabelText("Ngày trả phòng"), { target: { value: departure } });
+    await user.click(screen.getByRole("button", { name: "Tìm khách sạn" }));
+    const hotel = (await screen.findByRole("heading", { name: "Vinpearl Beachfront Nha Trang" })).closest("article")!;
+    expect(within(hotel).getByText(/2\.659\.475/)).toBeVisible();
+    expect(within(hotel).getByText("Từ / phòng / đêm")).toBeVisible();
+    await user.selectOptions(screen.getByLabelText("Tầm giá / phòng / đêm"), "2-5");
+    await user.click(screen.getByRole("button", { name: /xem phòng tại vinpearl beachfront/i }));
+    const toggle = await screen.findByRole("button", { name: "Allotment Deluxe Ocean" });
+    expect(within(toggle.closest("tr")!).getByText(/2\.659\.475/)).toBeVisible();
+    await user.click(toggle);
+    const choose = screen.getByRole("button", { name: "Chọn Deluxe Ocean · Agent · Bao gồm bữa sáng" });
+    expect(choose).toHaveTextContent(/2\.659\.475/);
+    await user.click(choose);
+    const quantity = await screen.findByLabelText("Số phòng Deluxe Ocean · Agent · Bao gồm bữa sáng");
+    fireEvent.change(quantity, { target: { value: "2" } });
+    const sidebar = screen.getByRole("complementary", { name: "Hạng phòng đã chọn" });
+    const formattedTotal = new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND", maximumFractionDigits: 0 }).format(total * 2).replace(/\s+/g, " ");
+    expect(within(sidebar).getAllByText(formattedTotal)).toHaveLength(2);
+    expect(within(screen.getByRole("table", { name: "Giá theo allotment · Deluxe Ocean" })).getByRole("button", { name: "Bỏ chọn Deluxe Ocean · Agent · Bao gồm bữa sáng" })).toHaveTextContent(/2\.659\.475/);
+  });
+
   test("uses a compact search form and leaves guest counts for room assignment", async () => {
     render(<App />);
     await screen.findByRole("heading", { name: "Tìm phòng" });
@@ -92,11 +125,11 @@ describe("NT Travel bedbank v1", () => {
     await user.click(screen.getByRole("button", { name: "Bỏ lọc" }));
     await user.selectOptions(screen.getByLabelText("Hạng sao"), "5");
     expect(screen.queryByRole("heading", { name: "Villa Vườn" })).not.toBeInTheDocument();
-    await user.selectOptions(screen.getByLabelText("Tầm giá / phòng / kỳ"), "2-5");
+    await user.selectOptions(screen.getByLabelText("Tầm giá / phòng / đêm"), "2-5");
     await user.selectOptions(screen.getByLabelText("Chính sách"), "refundable");
     await user.selectOptions(screen.getByLabelText("Dịch vụ / tiện ích"), "Spa");
     expect(screen.getByRole("heading", { name: "Khách sạn Biển" })).toBeVisible();
-    expect(screen.getByText(/4\.000\.000/)).toBeVisible();
+    expect(screen.getByText(/2\.000\.000/)).toBeVisible();
     await user.selectOptions(screen.getByLabelText("Chính sách"), "non-refundable");
     expect(screen.getByText("Không có kết quả phù hợp bộ lọc.")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Bỏ lọc" }));
@@ -111,7 +144,7 @@ describe("NT Travel bedbank v1", () => {
     expect(screen.getByLabelText("Loại lưu trú")).toBeDisabled();
     expect(screen.getByLabelText("Dịch vụ / tiện ích")).toBeDisabled();
     expect(screen.getByLabelText("Chính sách")).toBeDisabled();
-    expect(screen.getByLabelText("Tầm giá / phòng / kỳ")).toBeEnabled();
+    expect(screen.getByLabelText("Tầm giá / phòng / đêm")).toBeEnabled();
   });
 
   function stubRoomPrograms() {
@@ -164,8 +197,8 @@ describe("NT Travel bedbank v1", () => {
     expect(within(comparison).getByRole("columnheader", { name: "SUMMER PROMOTION" })).toBeVisible();
     const breakfast = within(comparison).getByRole("rowheader", { name: "Bao gồm bữa sáng" }).closest("tr")!;
     const prices = within(breakfast).getAllByRole("cell");
-    expect(prices[0]).toHaveTextContent(/5\.500\.000/);
-    expect(prices[1]).toHaveTextContent(/4\.500\.000/);
+    expect(prices[0]).toHaveTextContent(/2\.750\.000/);
+    expect(prices[1]).toHaveTextContent(/2\.250\.000/);
     const roomOnly = within(comparison).getByRole("rowheader", { name: "Chỉ phòng" }).closest("tr")!;
     expect(within(roomOnly).getAllByRole("cell")[1]).toHaveTextContent("Chưa có giá");
     await user.click(screen.getByRole("button", { name: "Chọn Deluxe Ocean · BEST RATES - AGENT · Bao gồm bữa sáng" }));
@@ -196,7 +229,7 @@ describe("NT Travel bedbank v1", () => {
     expect(within(table).getAllByRole("row")).toHaveLength(3);
     const toggle = within(table).getByRole("button", { name: "Chương trình giá Deluxe Ocean" });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
-    expect(within(toggle.closest("tr")!).getByText(/4\.200\.000/)).toBeVisible();
+    expect(within(toggle.closest("tr")!).getByText(/2\.100\.000/)).toBeVisible();
     expect(within(table).queryByText(/3\.000\.000/)).not.toBeInTheDocument();
     expect(within(table).queryByRole("button", { name: /Chọn Deluxe Ocean/ })).not.toBeInTheDocument();
 
@@ -599,12 +632,12 @@ describe("NT Travel bedbank v1", () => {
     await user.type(screen.getByLabelText("Điểm đến hoặc khách sạn"), "Nha Trang");
     await user.click(screen.getByRole("button", { name: "Tìm khách sạn" }));
     await user.click(await screen.findByRole("button", { name: /xem phòng tại vinpearl beachfront/i }));
-    expect(await screen.findByText("Giá net / phòng / kỳ")).toBeVisible();
+    expect(await screen.findByText("Giá net / phòng / đêm")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Chương trình giá Deluxe Ocean" }));
     await user.click(await screen.findByRole("button", { name: /xem giá chi tiết deluxe ocean/i }));
 
     expect(await screen.findByRole("heading", { name: "Chi tiết giá net" })).toBeVisible();
-    expect(screen.getAllByText("Giá net / phòng / kỳ")).toHaveLength(2);
+    expect(screen.getAllByText("Giá net / phòng / đêm")).toHaveLength(2);
     expect(screen.getAllByText(/4\.900\.000/).length).toBeGreaterThan(0);
     expect(screen.getByText("Miễn phí hủy trước 3 ngày.")).toBeVisible();
     expect(screen.getByRole("button", { name: "Tiếp tục đặt phòng" })).toBeVisible();

@@ -13,15 +13,15 @@ const rates: RoomAvailabilityDto[] = [
 
 test("aligns prices by program with allotments as columns and leaves missing offers empty", async () => {
   const user = userEvent.setup();
-  render(<RoomRateTable hotelName="Demo" rooms={rates} chosen={[]} busy={false} onChoose={vi.fn()} onDetail={vi.fn()} onQuantity={vi.fn()} onQuickBook={vi.fn()} />);
+  render(<RoomRateTable hotelName="Demo" nights={2} rooms={rates} chosen={[]} busy={false} onChoose={vi.fn()} onDetail={vi.fn()} onQuantity={vi.fn()} onQuickBook={vi.fn()} />);
   await user.click(screen.getByText("Deluxe", { exact: true }));
   const table = screen.getByRole("table", { name: "Giá theo allotment · Deluxe" });
   expect(within(table).getAllByRole("columnheader").map((header) => header.textContent)).toEqual(["Chương trình giá", "Agent", "Summer"]);
   expect(within(table).getAllByRole("rowheader")).toHaveLength(2);
   const breakfast = within(table).getByRole("rowheader", { name: "Bao gồm bữa sáng" }).closest("tr")!;
   const cells = within(breakfast).getAllByRole("cell");
-  expect(cells[0]).toHaveTextContent(/4\.000\.000/);
-  expect(cells[1]).toHaveTextContent(/3\.500\.000/);
+  expect(cells[0]).toHaveTextContent(/2\.000\.000/);
+  expect(cells[1]).toHaveTextContent(/1\.750\.000/);
   const missing = within(within(table).getByRole("rowheader", { name: "Chỉ phòng" }).closest("tr")!).getAllByRole("cell")[1]!;
   expect(missing).toHaveTextContent("Chưa có giá");
   expect(within(missing).queryByRole("button")).not.toBeInTheDocument();
@@ -29,7 +29,7 @@ test("aligns prices by program with allotments as columns and leaves missing off
 
 test("builds comparison columns only from the allotments supplied by the server", async () => {
   const user = userEvent.setup();
-  render(<RoomRateTable hotelName="Demo" rooms={rates.filter((rate) => rate.allotmentId === "agent")} chosen={[]} busy={false} onChoose={vi.fn()} onDetail={vi.fn()} onQuantity={vi.fn()} onQuickBook={vi.fn()} />);
+  render(<RoomRateTable hotelName="Demo" nights={2} rooms={rates.filter((rate) => rate.allotmentId === "agent")} chosen={[]} busy={false} onChoose={vi.fn()} onDetail={vi.fn()} onQuantity={vi.fn()} onQuickBook={vi.fn()} />);
   await user.click(screen.getByText("Deluxe", { exact: true }));
   const table = screen.getByRole("table", { name: "Giá theo allotment · Deluxe" });
   expect(within(table).getAllByRole("columnheader").map((header) => header.textContent)).toEqual(["Chương trình giá", "Agent"]);
